@@ -81,13 +81,24 @@ class LibInfo:
         return list(self.install_dir / 'lib' / f'{name}{suffix}' for name in self._lib_names)
 
     @property
+    def link_libraries64(self) -> List[Path]:
+        """Path to the libraries used when linking."""
+        suffix = self._lib_suffix
+        return list(self.install_dir / 'lib64' / f'{name}{suffix}' for name in self._lib_names)
+
+    @property
     def install_libraries(self) -> List[Path]:
         """Path to the libraries to install."""
         if self.static_lib:
             return []
         if self._config.target_os.is_windows:
             return [self.install_dir / 'bin' / f'{name}.dll' for name in self._lib_names]
-        return self.link_libraries
+        if os.path.exists(self.link_libraries[0]):
+            return self.link_libraries
+        elif os.path.exists(self.link_libraries64[0]):
+            return self.link_libraries64
+        else:
+            assert False
 
     @property
     def symlinks(self) -> List[Path]:
@@ -548,6 +559,10 @@ class LLVMBuilder(LLVMBaseBuilder):
             defines['LLDB_ENABLE_LZMA'] = 'ON'
             defines['LIBLZMA_INCLUDE_DIR'] = str(self.liblzma.include_dir)
             defines['LIBLZMA_LIBRARY'] = str(self.liblzma.link_libraries[0])
+            if os.path.exists(self.liblzma.link_libraries[0]):
+                defines['LIBLZMA_LIBRARY'] = str(self.liblzma.link_libraries[0])
+            elif os.path.exists(self.liblzma.link_libraries64[0]):
+                defines['LIBLZMA_LIBRARY'] = str(self.liblzma.link_libraries64[0])
         else:
             defines['LLDB_ENABLE_LZMA'] = 'OFF'
 
@@ -624,7 +639,12 @@ class LLVMBuilder(LLVMBaseBuilder):
         # libxml2 is used by lld and lldb.
         if self.libxml2:
             defines['LIBXML2_INCLUDE_DIR'] = str(self.libxml2.include_dir)
-            defines['LIBXML2_LIBRARY'] = str(self.libxml2.link_libraries[0])
+            if os.path.exists(self.libxml2.link_libraries[0]):
+                defines['LIBXML2_LIBRARY'] = str(self.libxml2.link_libraries[0])
+            elif os.path.exists(self.libxml2.link_libraries64[0]):
+                defines['LIBXML2_LIBRARY'] = str(self.libxml2.link_libraries64[0])
+            else:
+                assert False
 
         if self.build_lldb:
             self._set_lldb_flags(self._config.target_os, defines)

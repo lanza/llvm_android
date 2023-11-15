@@ -127,7 +127,7 @@ class Stage2Builder(base_builders.LLVMBuilder):
     debug_build: bool = False
     build_instrumented: bool = False
     profdata_file: Optional[Path] = None
-    lto: bool = True
+    lto: bool = False
 
     @property
     def llvm_targets(self) -> Set[str]:
@@ -673,7 +673,7 @@ class LibXml2Builder(base_builders.CMakeBuilder, base_builders.LibInfo):
         if self._config.target_os.is_windows:
             return []
         ext = 'so' if self._config.target_os.is_linux else 'dylib'
-        return [self.install_dir / 'lib' / f'libxml2.{ext}']
+        return [self.install_dir / 'lib64' / f'libxml2.{ext}']
 
 
 class LldbServerBuilder(base_builders.LLVMRuntimeBuilder):
