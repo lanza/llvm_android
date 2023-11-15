@@ -1,5 +1,11 @@
 [
     {
+        "comment": "[UPSTREAM] Fixes to turn on XRay on Android",
+        "rel_patch_path": "cherry/53e7ab5d5a0059347f9237b8d349d4038f21e309.patch",
+        "start_version": 416183,
+        "end_version": 416184
+    },
+    {
         "comment": "[UPSTREAM] Revert \"[MachineDebugify] Insert synthetic DBG_VALUE instructions\"",
         "rel_patch_path": "cherry/841f9c937f6e593c926a26aedf054436eb807fe6.patch",
         "start_version": 412851,
@@ -252,16 +258,16 @@
         "end_version": 426529
     },
     {
-        "comment": "Revert two changes that break Android builds.",
-        "rel_patch_path": "Revert-two-changes-that-break-Android-builds.v4.patch",
-        "start_version": 412851,
-        "end_version": 416183
-    },
-    {
         "comment": "[UPSTREAM] [compiler-rt] [builtins] [AArch64] Add missing AArch64 data synchronization barrier (dsb) to __clear_cache",
         "rel_patch_path": "cherry/6455418d3d2a2de1a8251cc2ccf2e87b9ae3112d.patch",
         "start_version": 416183,
         "end_version": 429795
+    },
+    {
+        "comment": "Revert two changes that break Android builds.",
+        "rel_patch_path": "Revert-two-changes-that-break-Android-builds.v4.patch",
+        "start_version": 412851,
+        "end_version": 416183
     },
     {
         "comment": "Revert two changes that break Android builds.",

@@ -1,0 +1,270 @@
+From 53e7ab5d5a0059347f9237b8d349d4038f21e309 Mon Sep 17 00:00:00 2001
+From: Ionut Hristodorescu <ionuth@meta.com>
+Date: Sat, 24 Jun 2023 14:17:22 -0700
+Subject: [PATCH] Fixes to turn on XRay on Android
+
+Change-Id: Id9a5e07b978b74a3b250bbe42e58b7c754bec0d5
+---
+ compiler-rt/CMakeLists.txt                |  2 ++
+ compiler-rt/cmake/builtin-config-ix.cmake |  2 ++
+ compiler-rt/cmake/config-ix.cmake         | 33 ++++++++++++++++++++++-
+ compiler-rt/lib/CMakeLists.txt            |  3 +++
+ compiler-rt/lib/xray/CMakeLists.txt       |  3 +++
+ compiler-rt/lib/xray/xray_flags.cpp       |  4 +++
+ compiler-rt/lib/xray/xray_init.cpp        |  4 ++-
+ llvm/lib/CodeGen/XRayInstrumentation.cpp  | 14 +++++++++-
+ 8 files changed, 62 insertions(+), 3 deletions(-)
+
+diff --git a/compiler-rt/CMakeLists.txt b/compiler-rt/CMakeLists.txt
+index 30302c2c1427..be922c74a364 100644
+--- a/compiler-rt/CMakeLists.txt
++++ b/compiler-rt/CMakeLists.txt
+@@ -50,6 +50,8 @@ mark_as_advanced(COMPILER_RT_BUILD_MEMPROF)
+ option(COMPILER_RT_BUILD_XRAY_NO_PREINIT "Build xray with no preinit patching" OFF)
+ mark_as_advanced(COMPILER_RT_BUILD_XRAY_NO_PREINIT)
+ 
++message("ionut : COMPILER_RT_BUILD_XRAY = ${COMPILER_RT_BUILD_XRAY} in compiler-rt/CMakeLists.txt\n")
++
+ set(COMPILER_RT_ASAN_SHADOW_SCALE ""
+     CACHE STRING "Override the shadow scale to be used in ASan runtime")
+ 
+diff --git a/compiler-rt/cmake/builtin-config-ix.cmake b/compiler-rt/cmake/builtin-config-ix.cmake
+index ad3b98799c5c..dcb8044e0dee 100644
+--- a/compiler-rt/cmake/builtin-config-ix.cmake
++++ b/compiler-rt/cmake/builtin-config-ix.cmake
+@@ -14,6 +14,8 @@ builtin_check_c_compiler_flag(-fomit-frame-pointer  COMPILER_RT_HAS_OMIT_FRAME_P
+ builtin_check_c_compiler_flag(-ffreestanding        COMPILER_RT_HAS_FREESTANDING_FLAG)
+ builtin_check_c_compiler_flag(-fxray-instrument     COMPILER_RT_HAS_XRAY_COMPILER_FLAG)
+ 
++message("ionut : compiler-rt/cmake/builtin-config-ix.cmake COMPILER_RT_HAS_XRAY_COMPILER_FLAG = ${COMPILER_RT_HAS_XRAY_COMPILER_FLAG}\n")
++
+ builtin_check_c_compiler_source(COMPILER_RT_HAS_ATOMIC_KEYWORD
+ "
+ int foo(int x, int y) {
+diff --git a/compiler-rt/cmake/config-ix.cmake b/compiler-rt/cmake/config-ix.cmake
+index f81b8384cbd5..f33c046cc693 100644
+--- a/compiler-rt/cmake/config-ix.cmake
++++ b/compiler-rt/cmake/config-ix.cmake
+@@ -343,6 +343,16 @@ set(ALL_XRAY_SUPPORTED_ARCH ${X86_64} ${ARM32} ${ARM64} ${MIPS32} ${MIPS64} powe
+ endif()
+ set(ALL_SHADOWCALLSTACK_SUPPORTED_ARCH ${ARM64})
+ 
++message("ionut initially : ALL_XRAY_SUPPORTED_ARCH : ${ALL_XRAY_SUPPORTED_ARCH}\n")
++message("ionut initially : XRAY_SUPPORTED_ARCH : ${XRAY_SUPPORTED_ARCH}\n")
++message("ionut initially : ALL_SANITIZER_COMMON_SUPPORTED_ARCH : ${ALL_SANITIZER_COMMON_SUPPORTED_ARCH}\n")
++message("ionut initially : SANITIZER_COMMON_SUPPORTED_ARCH : ${SANITIZER_COMMON_SUPPORTED_ARCH}\n")
++message("ionut initially : COMPILER_RT_SUPPORTED_ARCH : ${COMPILER_RT_SUPPORTED_ARCH}\n")
++
++#set(XRAY_SUPPORTED_ARCH "${XRAY_SUPPORTED_ARCH};${ARM64}")
++#message("forcing XRAY_SUPPORTED_ARCH: ${XRAY_SUPPORTED_ARCH}\n")
++
++
+ if(APPLE)
+   include(CompilerRTDarwinUtils)
+ 
+@@ -620,6 +630,12 @@ else()
+   filter_available_targets(GWP_ASAN_SUPPORTED_ARCH ${ALL_GWP_ASAN_SUPPORTED_ARCH})
+ endif()
+ 
++message("ionut finally XRAY_SUPPORTED_ARCH = ${XRAY_SUPPORTED_ARCH}\n")
++message("ionut finally ALL_XRAY_SUPPORTED_ARCH = ${ALL_XRAY_SUPPORTED_ARCH}\n")
++message("ionut finally : ALL_SANITIZER_COMMON_SUPPORTED_ARCH : ${ALL_SANITIZER_COMMON_SUPPORTED_ARCH}\n")
++message("ionut finally : SANITIZER_COMMON_SUPPORTED_ARCH : ${SANITIZER_COMMON_SUPPORTED_ARCH}\n")
++message("ionut finally : COMPILER_RT_SUPPORTED_ARCH : ${COMPILER_RT_SUPPORTED_ARCH}\n")
++
+ if (MSVC)
+   # See if the DIA SDK is available and usable.
+   set(MSVC_DIA_SDK_DIR "$ENV{VSINSTALLDIR}DIA SDK")
+@@ -771,13 +787,28 @@ else()
+   set(COMPILER_RT_HAS_SCUDO FALSE)
+ endif()
+ 
++message("ionut : compiler-rt/cmake/config-ix.cmake XRAY_SUPPORTED_ARCH = ${XRAY_SUPPORTED_ARCH}\n")
++message("ionut : compiler-rt/cmake/config-ix.cmake COMPILER_RT_HAS_SANITIZER_COMMON = ${COMPILER_RT_HAS_SANITIZER_COMMON}\n")
++if(OS_NAME MATCHES "Android|Darwin|Linux|FreeBSD|NetBSD|Fuchsia")
++  message("ionut : compiler-rt/cmake/config-ix.cmake [${OS_NAME}] matches\n")
++else()
++  message("ionut : compiler-rt/cmake/config-ix.cmake [${OS_NAME}] DOES NOT MATCH\n")
++endif()
++
++message("ionut : compiler-rt/cmake/config-ix.cmake XRAY_SUPPORTED_ARCH = ${XRAY_SUPPORTED_ARCH}\n")
+ if (COMPILER_RT_HAS_SANITIZER_COMMON AND XRAY_SUPPORTED_ARCH AND
+-    OS_NAME MATCHES "Darwin|Linux|FreeBSD|NetBSD|Fuchsia")
++		OS_NAME MATCHES "Android|Darwin|Linux|FreeBSD|NetBSD|Fuchsia")
++  message("ionut : compiler-rt/cmake/config-ix.cmake setting COMPILER_RT_HAS_XRAY = TRUE")
+   set(COMPILER_RT_HAS_XRAY TRUE)
+ else()
++  message("ionut : compiler-rt/cmake/config-ix.cmake setting COMPILER_RT_HAS_XRAY = FALSE")
+   set(COMPILER_RT_HAS_XRAY FALSE)
+ endif()
+ 
++message("ionut : compiler-rt/cmake/config-ix.cmake COMPILER_RT_HAS_XRAY = ${COMPILER_RT_HAS_XRAY}\n")
++message("ionut : compiler-rt/cmake/config-ix.cmake COMPILER_RT_HAS_SANITIZER_COMMON = ${COMPILER_RT_HAS_SANITIZER_COMMON}\n")
++message("ionut : compiler-rt/cmake/config-ix.cmake OS_NAME = ${OS_NAME}\n")
++
+ if (COMPILER_RT_HAS_SANITIZER_COMMON AND FUZZER_SUPPORTED_ARCH AND
+     OS_NAME MATCHES "Android|Darwin|Linux|NetBSD|FreeBSD|Fuchsia|Windows")
+   set(COMPILER_RT_HAS_FUZZER TRUE)
+diff --git a/compiler-rt/lib/CMakeLists.txt b/compiler-rt/lib/CMakeLists.txt
+index c1c6880a4720..0e82fa17050e 100644
+--- a/compiler-rt/lib/CMakeLists.txt
++++ b/compiler-rt/lib/CMakeLists.txt
+@@ -23,7 +23,9 @@ endif()
+ 
+ function(compiler_rt_build_runtime runtime)
+   string(TOUPPER ${runtime} runtime_uppercase)
++  message("ionut : in compiler-rt/lib/CMakeLists.tx COMPILER_RT_HAS_${runtime_uppercase} = ${COMPILER_RT_HAS_${runtime_uppercase}}\n")
+   if(COMPILER_RT_HAS_${runtime_uppercase})
++    message("ok, compiler_rt has ${runtime}\n")
+     add_subdirectory(${runtime})
+     if(${runtime} STREQUAL tsan)
+       add_subdirectory(tsan/dd)
+@@ -55,6 +57,7 @@ if(COMPILER_RT_BUILD_PROFILE AND COMPILER_RT_HAS_PROFILE)
+ endif()
+ 
+ if(COMPILER_RT_BUILD_XRAY)
++  message("XRay build enabled\n")	
+   compiler_rt_build_runtime(xray)
+ endif()
+ 
+diff --git a/compiler-rt/lib/xray/CMakeLists.txt b/compiler-rt/lib/xray/CMakeLists.txt
+index 54f2ad8f7ec1..2187caa1d376 100644
+--- a/compiler-rt/lib/xray/CMakeLists.txt
++++ b/compiler-rt/lib/xray/CMakeLists.txt
+@@ -239,9 +239,12 @@ if (APPLE)
+     PARENT_TARGET xray)
+ else() # not Apple
+   foreach(arch ${XRAY_SUPPORTED_ARCH})
++    message("ionut : in xray/CMakeLists.txt CAN_TARGET_${arch} = ${CAN_TARGET_${arch}}\n")	  
+     if(NOT CAN_TARGET_${arch})
++      message ("cannot target ${arch}\n")	    
+       continue()
+     endif()
++    message ("CAN target ${arch}\n")	    
+     add_compiler_rt_object_libraries(RTXray
+       ARCHS ${arch}
+       SOURCES ${XRAY_SOURCES} ${${arch}_SOURCES}
+diff --git a/compiler-rt/lib/xray/xray_flags.cpp b/compiler-rt/lib/xray/xray_flags.cpp
+index e4c6906dc443..bdcb519ce987 100644
+--- a/compiler-rt/lib/xray/xray_flags.cpp
++++ b/compiler-rt/lib/xray/xray_flags.cpp
+@@ -17,6 +17,8 @@
+ #include "sanitizer_common/sanitizer_libc.h"
+ #include "xray_defs.h"
+ 
++#include <stdio.h>
++
+ using namespace __sanitizer;
+ 
+ namespace __xray {
+@@ -70,6 +72,8 @@ void initializeFlags() XRAY_NEVER_INSTRUMENT {
+   // Override from environment variables.
+   XRayParser.ParseStringFromEnv("XRAY_OPTIONS");
+ 
++
++  printf("************************* after XRAY OPTIONS ******************** \n\n");
+   // Override from command line.
+   InitializeCommonFlags();
+ 
+diff --git a/compiler-rt/lib/xray/xray_init.cpp b/compiler-rt/lib/xray/xray_init.cpp
+index 00ba5fe4a52b..94655d8e2072 100644
+--- a/compiler-rt/lib/xray/xray_init.cpp
++++ b/compiler-rt/lib/xray/xray_init.cpp
+@@ -14,6 +14,7 @@
+ #include <fcntl.h>
+ #include <strings.h>
+ #include <unistd.h>
++#include <stdio.h>
+ 
+ #include "sanitizer_common/sanitizer_common.h"
+ #include "xray_defs.h"
+@@ -60,7 +61,8 @@ SpinMutex XRayInitMutex;
+ 
+ // __xray_init() will do the actual loading of the current process' memory map
+ // and then proceed to look for the .xray_instr_map section/segment.
+-void __xray_init() XRAY_NEVER_INSTRUMENT {
++void __xray_init() XRAY_NEVER_INSTRUMENT {  
++  printf("************ __xray_init begin ***********\n");
+   SpinMutexLock Guard(&XRayInitMutex);
+   // Short-circuit if we've already initialized XRay before.
+   if (atomic_load(&XRayInitialized, memory_order_acquire))
+diff --git a/llvm/lib/CodeGen/XRayInstrumentation.cpp b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+index d60db382ba59..c9f2ed0627dc 100644
+--- a/llvm/lib/CodeGen/XRayInstrumentation.cpp
++++ b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+@@ -137,12 +137,14 @@ void XRayInstrumentation::prependRetWithPatchableExit(
+       if (Opc != 0) {
+         // Prepend the return instruction with PATCHABLE_FUNCTION_EXIT or
+         //   PATCHABLE_TAIL_CALL .
++	printf("XRayInstrumentation : prepending ret with patchable exit\n");
+         BuildMI(MBB, T, T.getDebugLoc(), TII->get(Opc));
+       }
+     }
+ }
+ 
+ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
++  //printf("XRayInstrumentation::runOnMachineFunction()\n");	
+   auto &F = MF.getFunction();
+   auto InstrAttr = F.getFnAttribute("function-instrument");
+   bool AlwaysInstrument = InstrAttr.isStringAttribute() &&
+@@ -150,7 +152,9 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
+   auto ThresholdAttr = F.getFnAttribute("xray-instruction-threshold");
+   auto IgnoreLoopsAttr = F.getFnAttribute("xray-ignore-loops");
+   unsigned int XRayThreshold = 0;
++  //printf("XRayInstrumentation::runOnMachineFunction() 1\n");	
+   if (!AlwaysInstrument) {
++    //printf("XRayInstrumentation::runOnMachineFunction() 2\n");	
+     if (!ThresholdAttr.isStringAttribute())
+       return false; // XRay threshold attribute not found.
+     if (ThresholdAttr.getValueAsString().getAsInteger(10, XRayThreshold))
+@@ -158,6 +162,7 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
+ 
+     bool IgnoreLoops = IgnoreLoopsAttr.isValid();
+ 
++    //printf("XRayInstrumentation::runOnMachineFunction() 3\n");	
+     // Count the number of MachineInstr`s in MachineFunction
+     int64_t MICount = 0;
+     for (const auto &MBB : MF)
+@@ -191,6 +196,7 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
+       // Function is too small
+       return false;
+     }
++    //printf("XRayInstrumentation::runOnMachineFunction() 4\n");	
+   }
+ 
+   // We look for the first non-empty MachineBasicBlock, so that we can insert
+@@ -200,24 +206,30 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
+   if (MBI == MF.end())
+     return false; // The function is empty.
+ 
++  //printf("XRayInstrumentation::runOnMachineFunction() 5 \n");	
+   auto *TII = MF.getSubtarget().getInstrInfo();
+   auto &FirstMBB = *MBI;
+   auto &FirstMI = *FirstMBB.begin();
+ 
+   if (!MF.getSubtarget().isXRaySupported()) {
++    printf("XRay : unsupported target \n");
+     FirstMI.emitError("An attempt to perform XRay instrumentation for an"
+                       " unsupported target.");
+     return false;
+   }
+-
++ 
++  //printf("XRayInstrumentation::runOnMachineFunction() 6 \n");	
+   if (!F.hasFnAttribute("xray-skip-entry")) {
++    //printf("XRayInstrumentation::runOnMachineFunction() no skip entry \n");	
+     // First, insert an PATCHABLE_FUNCTION_ENTER as the first instruction of the
+     // MachineFunction.
+     BuildMI(FirstMBB, FirstMI, FirstMI.getDebugLoc(),
+             TII->get(TargetOpcode::PATCHABLE_FUNCTION_ENTER));
+   }
+ 
++  //printf("XRayInstrumentation::runOnMachineFunction() i7 \n");	
+   if (!F.hasFnAttribute("xray-skip-exit")) {
++    //printf("XRayInstrumentation::runOnMachineFunction() no skip exit \n");	
+     switch (MF.getTarget().getTargetTriple().getArch()) {
+     case Triple::ArchType::arm:
+     case Triple::ArchType::thumb:
+-- 
+2.39.3
+
