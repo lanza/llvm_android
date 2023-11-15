@@ -1,9 +1,9 @@
 [
     {
-        "comment": "[UPSTREAM] Fixes to turn on XRay on Android",
-        "rel_patch_path": "cherry/53e7ab5d5a0059347f9237b8d349d4038f21e309.patch",
+        "comment": "[UPSTREAM] [xray] Honor xray-never function-instrument attribute",
+        "rel_patch_path": "cherry/d72a6e95a2450e2e76e2eee072ccb319f4f38b2e.patch",
         "start_version": 416183,
-        "end_version": 416184
+        "end_version": 416185
     },
     {
         "comment": "[UPSTREAM] Revert \"[MachineDebugify] Insert synthetic DBG_VALUE instructions\"",
@@ -40,6 +40,12 @@
         "rel_patch_path": "cherry/c82deed6764cbc63966374baf9721331901ca958.patch",
         "start_version": 407598,
         "end_version": 415963
+    },
+    {
+        "comment": "[UPSTREAM] Fixes to turn on XRay on Android",
+        "rel_patch_path": "cherry/53e7ab5d5a0059347f9237b8d349d4038f21e309.patch",
+        "start_version": 416183,
+        "end_version": 416184
     },
     {
         "comment": "[UPSTREAM] Revert \"[SLP]Merge reorder and reuse shuffles.\"",

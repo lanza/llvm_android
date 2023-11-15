@@ -1,0 +1,127 @@
+From d72a6e95a2450e2e76e2eee072ccb319f4f38b2e Mon Sep 17 00:00:00 2001
+From: Ian Levesque <ianlevesque@fb.com>
+Date: Wed, 14 Oct 2020 22:18:30 -0400
+Subject: [PATCH] [xray] Honor xray-never function-instrument attribute
+
+function-instrument=xray-never wasn't actually honored before. We were
+getting lucky that it worked because CodeGenFunction would omit the
+other xray attributes when a function was annotated with
+xray_never_instrument. This patch adds proper support.
+
+Differential Revision: https://reviews.llvm.org/D89441
+---
+ llvm/lib/CodeGen/XRayInstrumentation.cpp      |  4 +
+ .../AArch64/xray-attribute-instrumentation.ll | 73 +++++++++++++++++++
+ 2 files changed, 77 insertions(+)
+
+diff --git a/llvm/lib/CodeGen/XRayInstrumentation.cpp b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+index c9f2ed0627dc..142f197bb109 100644
+--- a/llvm/lib/CodeGen/XRayInstrumentation.cpp
++++ b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+@@ -149,6 +149,10 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
+   auto InstrAttr = F.getFnAttribute("function-instrument");
+   bool AlwaysInstrument = InstrAttr.isStringAttribute() &&
+                           InstrAttr.getValueAsString() == "xray-always";
++  bool NeverInstrument = InstrAttr.isStringAttribute() &&
++                         InstrAttr.getValueAsString() == "xray-never";
++  if (NeverInstrument && !AlwaysInstrument)
++    return false;
+   auto ThresholdAttr = F.getFnAttribute("xray-instruction-threshold");
+   auto IgnoreLoopsAttr = F.getFnAttribute("xray-ignore-loops");
+   unsigned int XRayThreshold = 0;
+diff --git a/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
+index 651130414bef..b14463ed32a8 100644
+--- a/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
+@@ -1,6 +1,7 @@
+ ; RUN: llc -filetype=asm -o - -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s
+ 
+ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always" {
++; CHECK-LABEL: foo:
+ ; CHECK-LABEL: Lxray_sled_0:
+ ; CHECK-NEXT:  b  #32
+ ; CHECK-NEXT:  nop
+@@ -24,8 +25,80 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LABEL: Ltmp1:
+ ; CHECK-NEXT:  ret
+ }
++
+ ; CHECK-LABEL: xray_instr_map
+ ; CHECK-LABEL: Lxray_sleds_start0
+ ; CHECK:       .xword .Lxray_sled_0
+ ; CHECK:       .xword .Lxray_sled_1
+ ; CHECK-LABEL: Lxray_sleds_end0
++
++define i32 @bar() nounwind noinline uwtable "function-instrument"="xray-never" "function-instrument"="xray-always" {
++; CHECK-LABEL: bar:
++; CHECK-LABEL: Lxray_sled_2:
++; CHECK-NEXT:  b  #32
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-LABEL: Ltmp4:
++  ret i32 0
++; CHECK-LABEL: Lxray_sled_3:
++; CHECK-NEXT:  b  #32
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-LABEL: Ltmp5:
++; CHECK-NEXT:  ret
++}
++
++; CHECK-LABEL: xray_instr_map
++; CHECK-LABEL: Lxray_sleds_start1
++; CHECK:       .xword .Lxray_sled_2
++; CHECK:       .xword .Lxray_sled_3
++; CHECK-LABEL: Lxray_sleds_end1
++
++define i32 @instrumented() nounwind noinline uwtable "xray-instruction-threshold"="1" {
++; CHECK-LABEL: instrumented:
++; CHECK-LABEL: Lxray_sled_4:
++; CHECK-NEXT:  b  #32
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-LABEL: Ltmp8:
++  ret i32 0
++; CHECK-LABEL: Lxray_sled_5:
++; CHECK-NEXT:  b  #32
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-NEXT:  nop
++; CHECK-LABEL: Ltmp9:
++; CHECK-NEXT:  ret
++}
++
++; CHECK-LABEL: xray_instr_map
++; CHECK-LABEL: Lxray_sleds_start2
++; CHECK:       .xword .Lxray_sled_4
++; CHECK:       .xword .Lxray_sled_5
++; CHECK-LABEL: Lxray_sleds_end2
++
++define i32 @not_instrumented() nounwind noinline uwtable "xray-instruction-threshold"="1" "function-instrument"="xray-never" {
++; CHECK-LABEL: not_instrumented
++; CHECK-NOT: .Lxray_sled_6
++  ret i32 0
++; CHECK:  ret
++}
+-- 
+2.39.3
+
