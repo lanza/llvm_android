@@ -1,0 +1,55 @@
+From 18c3d74b673cec21cbbafdf869207de532d03bc2 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Mon, 19 Jun 2023 14:53:22 -0700
+Subject: [PATCH] [xray][test] Test __xray_typedevent after D43668
+
+---
+ .../TestCases/Posix/typed-event-logging.cpp   | 36 +++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+ create mode 100644 compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
+
+diff --git a/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp b/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
+new file mode 100644
+index 000000000000..20c99557acc4
+--- /dev/null
++++ b/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
+@@ -0,0 +1,36 @@
++// RUN: %clangxx_xray %s -o %t
++// RUN: XRAY_OPTIONS=patch_premain=false:verbosity=1 %run %t 2>&1 | FileCheck %s
++
++// REQUIRES: target={{x86_64-.*linux.*}}
++
++#include <assert.h>
++#include <stdio.h>
++#include "xray/xray_interface.h"
++
++[[clang::xray_always_instrument]] void foo() {
++  static constexpr char CustomLogged[] = "hello custom logging!";
++  printf("before calling the custom logging...\n");
++  __xray_typedevent(42, CustomLogged, sizeof(CustomLogged));
++  printf("after calling the custom logging...\n");
++}
++
++static void myprinter(uint16_t type, const void *ptr, size_t size) {
++  assert(type == 42);
++  printf("%.*s\n", static_cast<int>(size), static_cast<const char*>(ptr));
++}
++
++int main() {
++  // CHECK: before calling the custom logging...
++  // CHECK-NEXT: after calling the custom logging...
++  foo();
++  __xray_set_typedevent_handler(myprinter);
++  __xray_patch();
++  // CHECK-NEXT: before calling the custom logging...
++  // CHECK-NEXT: hello custom logging!
++  // CHECK-NEXT: after calling the custom logging...
++  foo();
++  // CHECK-NEXT: before calling the custom logging...
++  // CHECK-NEXT: after calling the custom logging...
++  __xray_remove_typedevent_handler();
++  foo();
++}
+-- 
+2.39.3
+

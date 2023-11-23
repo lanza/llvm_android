@@ -1,0 +1,113 @@
+From 60f13aaf36885fb39aaceb439867f111f84e2882 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Tue, 20 Jun 2023 20:41:54 -0700
+Subject: [PATCH] [Driver] Allow XRay for more architectures on ELF systems
+
+Codegen OS-agnostic for ELF and the runtime is mostly OS-agnostic. It
+seems unnecessary to make restriction.
+
+While here, rewrite test/Driver/XRay/xray-instrument*.c to be more conventional:
+specify --target= explicitly instead of relying on the configured default target
+(which needs `REQUIRES:`).
+
+I am not sure enumerating every supported architecture is useful, so we just test a few.
+---
+ clang/lib/Driver/XRayArgs.cpp                 | 22 +++++--------------
+ clang/test/Driver/XRay/xray-instrument-cpu.c  |  5 -----
+ .../test/Driver/XRay/xray-instrument-macos.c  |  4 ----
+ clang/test/Driver/XRay/xray-instrument-os.c   |  4 ----
+ clang/test/Driver/XRay/xray-instrument.c      |  8 +++++++
+ 5 files changed, 14 insertions(+), 29 deletions(-)
+ delete mode 100644 clang/test/Driver/XRay/xray-instrument-cpu.c
+ delete mode 100644 clang/test/Driver/XRay/xray-instrument-macos.c
+ delete mode 100644 clang/test/Driver/XRay/xray-instrument-os.c
+ create mode 100644 clang/test/Driver/XRay/xray-instrument.c
+
+diff --git a/clang/lib/Driver/XRayArgs.cpp b/clang/lib/Driver/XRayArgs.cpp
+index 9a4b28576a9b..427c4ced3cd4 100644
+--- a/clang/lib/Driver/XRayArgs.cpp
++++ b/clang/lib/Driver/XRayArgs.cpp
+@@ -31,7 +31,12 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+                     options::OPT_fno_xray_instrument, false))
+     return;
+   XRayInstrument = Args.getLastArg(options::OPT_fxray_instrument);
+-  if (Triple.getOS() == llvm::Triple::Linux) {
++  if (Triple.isMacOSX()) {
++    if (Triple.getArch() != llvm::Triple::x86_64) {
++      D.Diag(diag::err_drv_unsupported_opt_for_target)
++          << XRayInstrument->getSpelling() << Triple.str();
++    }
++  } else if (Triple.isOSBinFormatELF()) {
+     switch (Triple.getArch()) {
+     case llvm::Triple::x86_64:
+     case llvm::Triple::arm:
+@@ -47,21 +52,6 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+       D.Diag(diag::err_drv_unsupported_opt_for_target)
+           << XRayInstrument->getSpelling() << Triple.str();
+     }
+-  } else if (Triple.isOSFreeBSD() || Triple.isOSOpenBSD() ||
+-             Triple.isOSNetBSD() || Triple.isMacOSX()) {
+-    if (Triple.getArch() != llvm::Triple::x86_64) {
+-      D.Diag(diag::err_drv_unsupported_opt_for_target)
+-          << XRayInstrument->getSpelling() << Triple.str();
+-    }
+-  } else if (Triple.getOS() == llvm::Triple::Fuchsia) {
+-    switch (Triple.getArch()) {
+-    case llvm::Triple::x86_64:
+-    case llvm::Triple::aarch64:
+-      break;
+-    default:
+-      D.Diag(diag::err_drv_unsupported_opt_for_target)
+-          << XRayInstrument->getSpelling() << Triple.str();
+-    }
+   } else {
+     D.Diag(diag::err_drv_unsupported_opt_for_target)
+         << XRayInstrument->getSpelling() << Triple.str();
+diff --git a/clang/test/Driver/XRay/xray-instrument-cpu.c b/clang/test/Driver/XRay/xray-instrument-cpu.c
+deleted file mode 100644
+index a8bc2a643133..000000000000
+--- a/clang/test/Driver/XRay/xray-instrument-cpu.c
++++ /dev/null
+@@ -1,5 +0,0 @@
+-// RUN: not %clang -o /dev/null -v -fxray-instrument -c %s
+-// XFAIL: target={{(amd64|x86_64|x86_64h|powerpc64le)-.*}}
+-// XFAIL: target={{(arm|aarch64|arm64|mips|mipsel|mips64|mips64el)-.*}}
+-// REQUIRES: linux
+-typedef int a;
+diff --git a/clang/test/Driver/XRay/xray-instrument-macos.c b/clang/test/Driver/XRay/xray-instrument-macos.c
+deleted file mode 100644
+index ce68345ed019..000000000000
+--- a/clang/test/Driver/XRay/xray-instrument-macos.c
++++ /dev/null
+@@ -1,4 +0,0 @@
+-// RUN: %clang -o /dev/null -v -fxray-instrument -target x86_64-apple-macos10.11 -c %s
+-// RUN: %clang -o /dev/null -v -fxray-instrument -target x86_64-apple-darwin15 -c %s
+-// REQUIRES: x86_64 || x86_64h
+-typedef int a;
+diff --git a/clang/test/Driver/XRay/xray-instrument-os.c b/clang/test/Driver/XRay/xray-instrument-os.c
+deleted file mode 100644
+index 7a4f1c13cb0b..000000000000
+--- a/clang/test/Driver/XRay/xray-instrument-os.c
++++ /dev/null
+@@ -1,4 +0,0 @@
+-// RUN: not %clang -o /dev/null -v -fxray-instrument -c %s
+-// XFAIL: target={{.*-(linux|freebsd).*}}, target=x86_64-apple-{{(darwin|macos).*}}
+-// REQUIRES: target={{(amd64|x86_64|x86_64h|arm|aarch64|arm64)-.*}}
+-typedef int a;
+diff --git a/clang/test/Driver/XRay/xray-instrument.c b/clang/test/Driver/XRay/xray-instrument.c
+new file mode 100644
+index 000000000000..430418446366
+--- /dev/null
++++ b/clang/test/Driver/XRay/xray-instrument.c
+@@ -0,0 +1,8 @@
++// RUN: %clang -### --target=aarch64-pc-freebsd -fxray-instrument -c %s -o /dev/null 2>&1 | FileCheck %s
++// RUN: %clang -### --target=x86_64-apple-darwin -fxray-instrument -c %s -o /dev/null 2>&1 | FileCheck %s
++// RUN: %clang -### --target=x86_64-pc-windows -fxray-instrument -c %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ERR
++
++// CHECK: "-cc1" {{.*}}"-fxray-instrument"
++// ERR:   error: unsupported option '-fxray-instrument' for target
++
++typedef int a;
+-- 
+2.39.3
+

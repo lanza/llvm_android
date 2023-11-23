@@ -1,0 +1,188 @@
+From d83298630797543ed47fbbdcd0dec4b686c7201d Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Wed, 5 Jul 2023 21:34:02 -0700
+Subject: [PATCH] [XRay][test] Remove unneeded REQUIRES: x86_64-target-arch
+
+fdr-thread-order.cpp can be very slow when the thread contention is large.
+Enable it for AArch64 and x86-64 for now.
+
+fdr-mode.cpp fails on a ppc64le machine. Unsupport it on ppc64le for now.
+
+The remaining modified tests pass on AArch64, ppc64le, and x86-64.
+---
+ .../test/xray/TestCases/Posix/always-never-instrument.cpp    | 2 +-
+ compiler-rt/test/xray/TestCases/Posix/basic-filtering.cpp    | 3 +--
+ compiler-rt/test/xray/TestCases/Posix/c-test.cpp             | 2 +-
+ .../test/xray/TestCases/Posix/clang-no-xray-instrument.cpp   | 1 -
+ compiler-rt/test/xray/TestCases/Posix/fdr-mode-inmemory.cpp  | 1 -
+ compiler-rt/test/xray/TestCases/Posix/fdr-mode-multiple.cpp  | 1 -
+ compiler-rt/test/xray/TestCases/Posix/fdr-mode.cpp           | 3 +--
+ compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp  | 2 --
+ compiler-rt/test/xray/TestCases/Posix/fdr-thread-order.cpp   | 4 ++--
+ .../test/xray/TestCases/Posix/profiling-multi-threaded.cpp   | 1 -
+ .../test/xray/TestCases/Posix/profiling-single-threaded.cpp  | 1 -
+ compiler-rt/test/xray/TestCases/Posix/quiet-start.cpp        | 5 ++---
+ 12 files changed, 8 insertions(+), 18 deletions(-)
+
+diff --git a/compiler-rt/test/xray/TestCases/Posix/always-never-instrument.cpp b/compiler-rt/test/xray/TestCases/Posix/always-never-instrument.cpp
+index fd9299b756bb..e5fefc07c1cc 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/always-never-instrument.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/always-never-instrument.cpp
+@@ -9,7 +9,7 @@
+ // RUN:    FileCheck %s --check-prefix NOINSTR
+ // RUN: %llvm_xray extract -symbolize %t | \
+ // RUN:    FileCheck %s --check-prefix ALWAYSINSTR
+-// REQUIRES: x86_64-target-arch
++
+ // REQUIRES: built-in-llvm-tree
+ 
+ // NOINSTR-NOT: {{.*__xray_NeverInstrumented.*}}
+diff --git a/compiler-rt/test/xray/TestCases/Posix/basic-filtering.cpp b/compiler-rt/test/xray/TestCases/Posix/basic-filtering.cpp
+index 3d4f4dda2d72..1440460c9de2 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/basic-filtering.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/basic-filtering.cpp
+@@ -22,8 +22,7 @@
+ // RUN:     "`ls basic-filtering-* | head -1`" | \
+ // RUN:     FileCheck %s --check-prefix TRACE
+ // RUN: rm -f basic-filtering-*
+-//
+-// REQUIRES: x86_64-target-arch
++
+ // REQUIRES: built-in-llvm-tree
+ 
+ #include <cstdio>
+diff --git a/compiler-rt/test/xray/TestCases/Posix/c-test.cpp b/compiler-rt/test/xray/TestCases/Posix/c-test.cpp
+index 28a7870d0f74..9a8a16dd3be0 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/c-test.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/c-test.cpp
+@@ -4,7 +4,7 @@
+ // RUN:     2>&1 | FileCheck %s
+ // RUN: rm -f xray-log.c-test.*
+ //
+-// REQUIRES: x86_64-target-arch
++// REQUIRES: target={{(aarch64|x86_64)-.*}}
+ // REQUIRES: built-in-llvm-tree
+ __attribute__((xray_always_instrument)) void always() {}
+ 
+diff --git a/compiler-rt/test/xray/TestCases/Posix/clang-no-xray-instrument.cpp b/compiler-rt/test/xray/TestCases/Posix/clang-no-xray-instrument.cpp
+index c2444b18ab6e..44f025db3790 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/clang-no-xray-instrument.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/clang-no-xray-instrument.cpp
+@@ -3,7 +3,6 @@
+ //
+ // RUN: %clangxx -fno-xray-instrument -c %s -o %t.o
+ // RUN: not %llvm_xray extract -symbolize %t.o 2>&1 | FileCheck %s
+-// REQUIRES: x86_64-target-arch
+ // REQUIRES: built-in-llvm-tree
+ 
+ // CHECK: llvm-xray: Cannot extract instrumentation map
+diff --git a/compiler-rt/test/xray/TestCases/Posix/fdr-mode-inmemory.cpp b/compiler-rt/test/xray/TestCases/Posix/fdr-mode-inmemory.cpp
+index ff31626d7779..4a866e203e47 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/fdr-mode-inmemory.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/fdr-mode-inmemory.cpp
+@@ -8,7 +8,6 @@
+ // RUN: [ $FILES -eq 0 ]
+ // RUN: rm -f fdr-inmemory-test-*
+ //
+-// REQUIRES: x86_64-target-arch
+ // REQUIRES: built-in-llvm-tree
+ 
+ #include "xray/xray_log_interface.h"
+diff --git a/compiler-rt/test/xray/TestCases/Posix/fdr-mode-multiple.cpp b/compiler-rt/test/xray/TestCases/Posix/fdr-mode-multiple.cpp
+index 487e3031325e..b0411a2cc73f 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/fdr-mode-multiple.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/fdr-mode-multiple.cpp
+@@ -8,7 +8,6 @@
+ // RUN: [ $FILES -eq 0 ]
+ // RUN: rm -f fdr-inmemory-test-*
+ //
+-// REQUIRES: x86_64-target-arch
+ // REQUIRES: built-in-llvm-tree
+ 
+ #include "xray/xray_log_interface.h"
+diff --git a/compiler-rt/test/xray/TestCases/Posix/fdr-mode.cpp b/compiler-rt/test/xray/TestCases/Posix/fdr-mode.cpp
+index 8b9cb2bbfd53..3065981a2c9a 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/fdr-mode.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/fdr-mode.cpp
+@@ -18,8 +18,7 @@
+ // RUN:     | FileCheck %s --check-prefix=UNWRITE
+ // RUN: rm fdr-logging-test-*
+ // RUN: rm fdr-unwrite-test-*
+-// FIXME: Make llvm-xray work on non-x86_64 as well.
+-// REQUIRES: x86_64-target-arch
++// UNSUPPORTED: target=powerpc64le-{{.*}}
+ // REQUIRES: built-in-llvm-tree
+ 
+ #include "xray/xray_log_interface.h"
+diff --git a/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp b/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp
+index 4215774d2406..94b21b50408f 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp
+@@ -7,8 +7,6 @@
+ // RUN: %llvm_xray convert --output-format=yaml --symbolize --instr_map=%t \
+ // RUN:   "`ls fdr-logging-1thr-* | head -n1`" | FileCheck %s
+ // RUN: rm fdr-logging-1thr-*
+-//
+-// REQUIRES: x86_64-target-arch
+ 
+ #include "xray/xray_log_interface.h"
+ #include <cassert>
+diff --git a/compiler-rt/test/xray/TestCases/Posix/fdr-thread-order.cpp b/compiler-rt/test/xray/TestCases/Posix/fdr-thread-order.cpp
+index eb405967a0d8..1dc79db27488 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/fdr-thread-order.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/fdr-thread-order.cpp
+@@ -7,8 +7,8 @@
+ // RUN: %llvm_xray convert --symbolize --output-format=yaml -instr_map=%t.exe %t/*
+ // RUN: %llvm_xray convert --symbolize --output-format=yaml -instr_map=%t.exe %t/* | \
+ // RUN:   FileCheck %s --check-prefix TRACE
+-// FIXME: Make llvm-xray work on non-x86_64 as well.
+-// REQUIRES: x86_64-target-arch
++
++// REQUIRES: target={{(aarch64|x86_64)-.*}}
+ // REQUIRES: built-in-llvm-tree
+ 
+ #include "xray/xray_log_interface.h"
+diff --git a/compiler-rt/test/xray/TestCases/Posix/profiling-multi-threaded.cpp b/compiler-rt/test/xray/TestCases/Posix/profiling-multi-threaded.cpp
+index 8bd15b7d312d..b850c053681a 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/profiling-multi-threaded.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/profiling-multi-threaded.cpp
+@@ -11,7 +11,6 @@
+ // RUN: [ $PROFILES -eq 1 ]
+ // RUN: rm -f xray-log.profiling-multi-*
+ //
+-// REQUIRES: x86_64-target-arch
+ // REQUIRES: built-in-llvm-tree
+ 
+ #include "xray/xray_interface.h"
+diff --git a/compiler-rt/test/xray/TestCases/Posix/profiling-single-threaded.cpp b/compiler-rt/test/xray/TestCases/Posix/profiling-single-threaded.cpp
+index fc518145edbb..b2359607379d 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/profiling-single-threaded.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/profiling-single-threaded.cpp
+@@ -11,7 +11,6 @@
+ // RUN: [ $PROFILES -eq 2 ]
+ // RUN: rm -f xray-log.profiling-single-*
+ //
+-// REQUIRES: x86_64-target-arch
+ // REQUIRES: built-in-llvm-tree
+ 
+ #include "xray/xray_interface.h"
+diff --git a/compiler-rt/test/xray/TestCases/Posix/quiet-start.cpp b/compiler-rt/test/xray/TestCases/Posix/quiet-start.cpp
+index 00d5af6609dd..48830017047c 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/quiet-start.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/quiet-start.cpp
+@@ -7,10 +7,9 @@
+ // RUN: XRAY_OPTIONS="patch_premain=true verbosity=0" %run %t 2>&1 | \
+ // RUN:    FileCheck %s --check-prefix QUIET
+ // RUN: XRAY_OPTIONS="" %run %t 2>&1 | FileCheck %s --check-prefix DEFAULT
+-//
+-// FIXME: Understand how to make this work on other platforms
++
+ // REQUIRES: built-in-llvm-tree
+-// REQUIRES: x86_64-target-arch
++
+ #include <iostream>
+ 
+ using namespace std;
+-- 
+2.39.3
+

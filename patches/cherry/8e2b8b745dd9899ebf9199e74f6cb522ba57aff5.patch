@@ -1,0 +1,39 @@
+From 8e2b8b745dd9899ebf9199e74f6cb522ba57aff5 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Sun, 18 Jun 2023 15:14:21 -0700
+Subject: [PATCH] [MC] flushPendingLabels: set Atom for new fragment after
+ D71368
+
+The newly created MCDataFragment should inherit Atom (see
+MCMachOStreamer::finishImpl). I cannot think of a case to test the
+behavior, but this is one step towards folding the Mach-O label
+difference below and making Mach-O more similar to ELF.
+
+```
+.section __DATA,xray_instr_map
+lxray_sleds_start1:
+.space 16
+Lxray_sleds_end1:
+.section __DATA,xray_fn_idx
+.quad (Lxray_sleds_end1-lxray_sleds_start1)>>4  // error: expected relocatable expression // Mach-O
+```
+---
+ llvm/lib/MC/MCSection.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/llvm/lib/MC/MCSection.cpp b/llvm/lib/MC/MCSection.cpp
+index 7997b237a7eb..10d925c9efc8 100644
+--- a/llvm/lib/MC/MCSection.cpp
++++ b/llvm/lib/MC/MCSection.cpp
+@@ -121,6 +121,8 @@ void MCSection::flushPendingLabels() {
+     MCFragment *F = new MCDataFragment();
+     getFragmentList().insert(CurInsertionPoint, F);
+     F->setParent(this);
++    if (CurInsertionPoint != begin())
++      F->setAtom(std::prev(CurInsertionPoint)->getAtom());
+     flushPendingLabels(F, 0, Label.Subsection);
+   }
+ }
+-- 
+2.39.3
+

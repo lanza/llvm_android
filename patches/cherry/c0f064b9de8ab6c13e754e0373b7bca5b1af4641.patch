@@ -1,0 +1,25 @@
+From c0f064b9de8ab6c13e754e0373b7bca5b1af4641 Mon Sep 17 00:00:00 2001
+From: Vitaly Buka <vitalybuka@google.com>
+Date: Wed, 21 Jun 2023 14:19:29 -0700
+Subject: [PATCH] [test] Add llvm-xray into XRAY_TEST_DEPS
+
+---
+ compiler-rt/test/xray/CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/compiler-rt/test/xray/CMakeLists.txt b/compiler-rt/test/xray/CMakeLists.txt
+index 2633717a24fa..b97659ae08f9 100644
+--- a/compiler-rt/test/xray/CMakeLists.txt
++++ b/compiler-rt/test/xray/CMakeLists.txt
+@@ -8,7 +8,7 @@ set(XRAY_FDR_TEST_DEPS ${SANITIZER_COMMON_LIT_TEST_DEPS})
+ 
+ if(NOT COMPILER_RT_STANDALONE_BUILD AND COMPILER_RT_BUILD_XRAY AND
+    COMPILER_RT_HAS_XRAY)
+-  list(APPEND XRAY_TEST_DEPS xray)
++  list(APPEND XRAY_TEST_DEPS xray llvm-xray)
+ endif()
+ 
+ set(XRAY_TEST_ARCH ${XRAY_SUPPORTED_ARCH})
+-- 
+2.39.3
+

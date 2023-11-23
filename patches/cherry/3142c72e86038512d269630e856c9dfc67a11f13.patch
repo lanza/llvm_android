@@ -1,0 +1,65 @@
+From 3142c72e86038512d269630e856c9dfc67a11f13 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Wed, 5 Jul 2023 20:06:37 -0700
+Subject: [PATCH] [XRay][test] Replace some XFAIL with more appropriate
+ REQUIRES
+
+---
+ .../test/xray/TestCases/Posix/arg1-arg0-logging.cpp        | 6 ++----
+ compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp      | 7 ++-----
+ .../xray/TestCases/Posix/arg1-logging-implicit-this.cpp    | 4 ++--
+ 3 files changed, 6 insertions(+), 11 deletions(-)
+
+diff --git a/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp b/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp
+index 7125f191b901..fea9054d2efd 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp
+@@ -4,10 +4,8 @@
+ // RUN: rm -f arg0-arg1-logging-*
+ // RUN: %clangxx_xray -std=c++11 %s -o %t
+ // RUN: XRAY_OPTIONS="patch_premain=true verbosity=1 xray_logfile_base=arg0-arg1-logging-" %run %t
+-//
+-// TODO: Support these in ARM and PPC
+-// XFAIL: target={{(arm|aarch64|mips).*}}
+-// UNSUPPORTED: target=powerpc64le{{.*}}
++
++// REQUIRES: target={{x86_64-.*}}
+ 
+ #include "xray/xray_interface.h"
+ #include <cassert>
+diff --git a/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp b/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp
+index ee957af6c84e..443f74c48213 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp
+@@ -9,11 +9,8 @@
+ // After all that, clean up the XRay log file.
+ //
+ // RUN: rm -f arg1-logger-*
+-//
+-// At the time of writing, the ARM trampolines weren't written yet.
+-// XFAIL: target={{(arm|aarch64|mips).*}}
+-// See the mailing list discussion of r296998.
+-// UNSUPPORTED: target=powerpc64le{{.*}}
++
++// REQUIRES: target={{x86_64-.*}}
+ 
+ #include "xray/xray_interface.h"
+ 
+diff --git a/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp b/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp
+index 938383e2ec87..e85a1d5474ce 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp
+@@ -4,8 +4,8 @@
+ // RUN: rm -f log-args-this-*
+ // RUN: XRAY_OPTIONS="patch_premain=true verbosity=1 xray_logfile_base=log-args-this-" %run %t
+ //
+-// XFAIL: target={{(arm|aarch64|mips).*}}
+-// UNSUPPORTED: target=powerpc64le{{.*}}
++// REQUIRES: target={{x86_64-.*}}
++
+ #include "xray/xray_interface.h"
+ #include <cassert>
+ 
+-- 
+2.39.3
+

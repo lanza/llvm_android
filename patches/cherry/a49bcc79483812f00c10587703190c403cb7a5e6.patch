@@ -1,0 +1,40 @@
+From a49bcc79483812f00c10587703190c403cb7a5e6 Mon Sep 17 00:00:00 2001
+From: Arthur Eubanks <aeubanks@google.com>
+Date: Wed, 25 Aug 2021 15:24:49 -0700
+Subject: [PATCH] [gn build] Don't copy xray includes
+
+The gn build doesn't support xray, so there's no reason to make the xray
+headers available. Some CMake checks check if xray includes are
+available to determine if xray is usable. Since we don't build the xray
+runtime, there are link errors.
+
+Reviewed By: thakis
+
+Differential Revision: https://reviews.llvm.org/D108737
+---
+ llvm/utils/gn/secondary/compiler-rt/include/BUILD.gn | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/llvm/utils/gn/secondary/compiler-rt/include/BUILD.gn b/llvm/utils/gn/secondary/compiler-rt/include/BUILD.gn
+index cccde7ab900c..a0ee79e3a52b 100644
+--- a/llvm/utils/gn/secondary/compiler-rt/include/BUILD.gn
++++ b/llvm/utils/gn/secondary/compiler-rt/include/BUILD.gn
+@@ -19,9 +19,14 @@ copy("include") {
+     "sanitizer/tsan_interface.h",
+     "sanitizer/tsan_interface_atomic.h",
+     "sanitizer/ubsan_interface.h",
++  ]
++  outputs = [ "$clang_resource_dir/include/{{source_target_relative}}" ]
++}
++
++source_set("_unused") {
++  sources = [
+     "xray/xray_interface.h",
+     "xray/xray_log_interface.h",
+     "xray/xray_records.h",
+   ]
+-  outputs = [ "$clang_resource_dir/include/{{source_target_relative}}" ]
+ }
+-- 
+2.39.3
+

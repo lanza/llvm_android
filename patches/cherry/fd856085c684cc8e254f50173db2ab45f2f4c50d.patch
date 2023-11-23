@@ -1,0 +1,79 @@
+From fd856085c684cc8e254f50173db2ab45f2f4c50d Mon Sep 17 00:00:00 2001
+From: Todd Lipcon <tlipcon@google.com>
+Date: Wed, 10 Feb 2021 12:54:00 +1100
+Subject: [PATCH] Fix xray fdr mode to allow multiple flushes
+
+Reviewed By: dberris
+
+Differential Revision: https://reviews.llvm.org/D96382
+---
+ compiler-rt/lib/xray/xray_fdr_logging.cpp     | 11 ++++----
+ .../test/xray/TestCases/Posix/fdr-reinit.cpp  | 26 ++++++++++---------
+ 2 files changed, 19 insertions(+), 18 deletions(-)
+
+diff --git a/compiler-rt/lib/xray/xray_fdr_logging.cpp b/compiler-rt/lib/xray/xray_fdr_logging.cpp
+index 16ce483502f0..799814f437f9 100644
+--- a/compiler-rt/lib/xray/xray_fdr_logging.cpp
++++ b/compiler-rt/lib/xray/xray_fdr_logging.cpp
+@@ -284,13 +284,12 @@ XRayLogFlushStatus fdrLoggingFlush() XRAY_NEVER_INSTRUMENT {
+     return XRayLogFlushStatus::XRAY_LOG_NOT_FLUSHING;
+   }
+ 
+-  s32 Result = XRayLogFlushStatus::XRAY_LOG_NOT_FLUSHING;
+-  if (!atomic_compare_exchange_strong(&LogFlushStatus, &Result,
+-                                      XRayLogFlushStatus::XRAY_LOG_FLUSHING,
+-                                      memory_order_release)) {
++  if (atomic_exchange(&LogFlushStatus, XRayLogFlushStatus::XRAY_LOG_FLUSHING,
++                      memory_order_release) ==
++      XRayLogFlushStatus::XRAY_LOG_FLUSHING) {
+     if (Verbosity())
+-      Report("Not flushing log, implementation is still finalizing.\n");
+-    return static_cast<XRayLogFlushStatus>(Result);
++      Report("Not flushing log, implementation is still flushing.\n");
++    return XRayLogFlushStatus::XRAY_LOG_NOT_FLUSHING;
+   }
+ 
+   if (BQ == nullptr) {
+diff --git a/compiler-rt/test/xray/TestCases/Posix/fdr-reinit.cpp b/compiler-rt/test/xray/TestCases/Posix/fdr-reinit.cpp
+index dc9888d6e48a..a8f2608f02be 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/fdr-reinit.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/fdr-reinit.cpp
+@@ -49,21 +49,23 @@ int main(int argc, char *argv[]) {
+   auto flush_status = __xray_log_flushLog();
+   assert(flush_status == XRayLogFlushStatus::XRAY_LOG_FLUSHED);
+ 
+-  // Without doing anything else, we should re-initialize.
+-  init_status = __xray_log_init_mode("xray-fdr", kConfig);
+-  assert(init_status == XRayLogInitStatus::XRAY_LOG_INITIALIZED);
++  for (auto trial = 0; trial < 3; trial++) {
++    // Without doing anything else, we should re-initialize.
++    init_status = __xray_log_init_mode("xray-fdr", kConfig);
++    assert(init_status == XRayLogInitStatus::XRAY_LOG_INITIALIZED);
+ 
+-  // Then we spin for a bit again calling func() enough times.
+-  for (auto i = 0; i < 1 << 20; ++i)
+-    func();
++    // Then we spin for a bit again calling func() enough times.
++    for (auto i = 0; i < 1 << 20; ++i)
++      func();
+ 
+-  // Then immediately finalize the implementation.
+-  finalize_status = __xray_log_finalize();
+-  assert(finalize_status == XRayLogInitStatus::XRAY_LOG_FINALIZED);
++    // Then immediately finalize the implementation.
++    finalize_status = __xray_log_finalize();
++    assert(finalize_status == XRayLogInitStatus::XRAY_LOG_FINALIZED);
+ 
+-  // Once we're here, we should then flush.
+-  flush_status = __xray_log_flushLog();
+-  assert(flush_status == XRayLogFlushStatus::XRAY_LOG_FLUSHED);
++    // Once we're here, we should then flush.
++    flush_status = __xray_log_flushLog();
++    assert(flush_status == XRayLogFlushStatus::XRAY_LOG_FLUSHED);
++  }
+ 
+   // Finally, we should signal the sibling thread to stop.
+   keep_going.clear(std::memory_order_release);
+-- 
+2.39.3
+

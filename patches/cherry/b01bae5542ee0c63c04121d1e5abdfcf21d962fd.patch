@@ -1,0 +1,81 @@
+From b01bae5542ee0c63c04121d1e5abdfcf21d962fd Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Mon, 19 Jun 2023 12:48:33 -0700
+Subject: [PATCH] [Driver] Correct -fnoxray-link-deps to -fno-xray-link-deps
+
+and removed unused CC1Option.
+Also change -whole-archive to the canonical spelling and improve tests.
+---
+ clang/include/clang/Driver/Options.td      | 6 ++----
+ clang/lib/Driver/ToolChains/CommonArgs.cpp | 4 ++--
+ clang/lib/Driver/XRayArgs.cpp              | 2 +-
+ clang/test/Driver/XRay/xray-nolinkdeps.cpp | 8 +++-----
+ 4 files changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/clang/include/clang/Driver/Options.td b/clang/include/clang/Driver/Options.td
+index cf7ace3b44e1..5f42a2a2b059 100644
+--- a/clang/include/clang/Driver/Options.td
++++ b/clang/include/clang/Driver/Options.td
+@@ -2082,10 +2082,8 @@ defm xray_function_index : BoolFOption<"xray-function-index",
+           " expense of single-function patching performance">>;
+ 
+ def fxray_link_deps : Flag<["-"], "fxray-link-deps">, Group<f_Group>,
+-  Flags<[CC1Option]>,
+-  HelpText<"Tells clang to add the link dependencies for XRay.">;
+-def fnoxray_link_deps : Flag<["-"], "fnoxray-link-deps">, Group<f_Group>,
+-  Flags<[CC1Option]>;
++  HelpText<"Link XRay runtime library when -fxray-instrument is specified (default)">;
++def fno_xray_link_deps : Flag<["-"], "fno-xray-link-deps">, Group<f_Group>;
+ 
+ def fxray_instrumentation_bundle :
+   Joined<["-"], "fxray-instrumentation-bundle=">,
+diff --git a/clang/lib/Driver/ToolChains/CommonArgs.cpp b/clang/lib/Driver/ToolChains/CommonArgs.cpp
+index e5f3250ab669..7a83c41c34cb 100644
+--- a/clang/lib/Driver/ToolChains/CommonArgs.cpp
++++ b/clang/lib/Driver/ToolChains/CommonArgs.cpp
+@@ -952,11 +952,11 @@ bool tools::addXRayRuntime(const ToolChain&TC, const ArgList &Args, ArgStringLis
+     return false;
+ 
+   if (TC.getXRayArgs().needsXRayRt()) {
+-    CmdArgs.push_back("-whole-archive");
++    CmdArgs.push_back("--whole-archive");
+     CmdArgs.push_back(TC.getCompilerRTArgString(Args, "xray"));
+     for (const auto &Mode : TC.getXRayArgs().modeList())
+       CmdArgs.push_back(TC.getCompilerRTArgString(Args, Mode));
+-    CmdArgs.push_back("-no-whole-archive");
++    CmdArgs.push_back("--no-whole-archive");
+     return true;
+   }
+ 
+diff --git a/clang/lib/Driver/XRayArgs.cpp b/clang/lib/Driver/XRayArgs.cpp
+index f15a91f1aba4..9a4b28576a9b 100644
+--- a/clang/lib/Driver/XRayArgs.cpp
++++ b/clang/lib/Driver/XRayArgs.cpp
+@@ -74,7 +74,7 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+         << XRayInstrument->getSpelling() << A->getSpelling();
+ 
+   if (!Args.hasFlag(options::OPT_fxray_link_deps,
+-                    options::OPT_fnoxray_link_deps, true))
++                    options::OPT_fno_xray_link_deps, true))
+     XRayRT = false;
+ 
+   auto Bundles =
+diff --git a/clang/test/Driver/XRay/xray-nolinkdeps.cpp b/clang/test/Driver/XRay/xray-nolinkdeps.cpp
+index 5461fc325a24..0c42c1af4f92 100644
+--- a/clang/test/Driver/XRay/xray-nolinkdeps.cpp
++++ b/clang/test/Driver/XRay/xray-nolinkdeps.cpp
+@@ -1,8 +1,6 @@
+-// RUN: %clang -v -o /dev/null -fxray-instrument -fnoxray-link-deps %s -### \
++// RUN: %clang -### --target=x86_64-unknown-linux-gnu -fxray-instrument -fxray-link-deps -fno-xray-link-deps %s \
+ // RUN:     2>&1 | FileCheck --check-prefix DISABLE %s
+-// RUN: %clang -v -o /dev/null -fxray-instrument -fxray-link-deps %s -### \
++// RUN: %clang -### --target=x86_64-unknown-linux-gnu -fxray-instrument %s \
+ // RUN:     2>&1 | FileCheck --check-prefix ENABLE %s
+-// ENABLE: clang_rt.xray
++// ENABLE:      "--whole-archive" "{{.*}}clang_rt.xray{{.*}}"--no-whole-archive"
+ // DISABLE-NOT: clang_rt.xray
+-// REQUIRES: linux || freebsd
+-// REQUIRES: amd64 || x86_64 || x86_64h || arm || aarch64 || arm64
+-- 
+2.39.3
+

@@ -1,0 +1,39 @@
+From 6bfaeeb3f9e5da1909b0bbc7307dce24886bfb82 Mon Sep 17 00:00:00 2001
+From: Jie Fu <jiefu@tencent.com>
+Date: Fri, 12 May 2023 11:10:08 +0800
+Subject: [PATCH] [xray] Ignore -Wc++20-extensions in xray_records.h [NFC]
+
+/data/llvm-project/compiler-rt/lib/xray/../../include/xray/xray_records.h:48:24: error: default member initializer for bit-field is a C++20 extension [
+-Werror,-Wc++20-extensions]
+  bool ConstantTSC : 1 = false;
+                       ^
+/data/llvm-project/compiler-rt/lib/xray/../../include/xray/xray_records.h:49:23: error: default member initializer for bit-field is a C++20 extension [
+-Werror,-Wc++20-extensions]
+  bool NonstopTSC : 1 = false;
+                      ^
+2 errors generated.
+---
+ compiler-rt/include/xray/xray_records.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/compiler-rt/include/xray/xray_records.h b/compiler-rt/include/xray/xray_records.h
+index 4789509c2c24..268c653d6b2d 100644
+--- a/compiler-rt/include/xray/xray_records.h
++++ b/compiler-rt/include/xray/xray_records.h
+@@ -43,10 +43,13 @@ struct alignas(32) XRayFileHeader {
+   // have different files for different information being stored.
+   uint16_t Type = 0;
+ 
++  #pragma clang diagnostic push
++  #pragma clang diagnostic ignored "-Wc++20-extensions"
+   // What follows are a set of flags that indicate useful things for when
+   // reading the data in the file.
+   bool ConstantTSC : 1 = false;
+   bool NonstopTSC : 1 = false;
++  #pragma clang diagnostic pop
+ 
+   // The frequency by which TSC increases per-second.
+   alignas(8) uint64_t CycleFrequency = 0;
+-- 
+2.39.3
+

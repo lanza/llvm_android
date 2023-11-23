@@ -1,0 +1,200 @@
+From afbc1080616d0649d20e8cdfb78551ca76dddeeb Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Sun, 11 Jun 2023 12:03:08 -0700
+Subject: [PATCH] [Driver] Simplify xray options
+
+Also add driver test missed by D87953 (-fxray-function-groups=).
+(test/Driver/XRay/lit.local.cfg misunderstands how driver testing works.
+We place the test in test/Driver instead.)
+---
+ clang/include/clang/Driver/XRayArgs.h      |   7 --
+ clang/lib/Driver/XRayArgs.cpp              | 107 ++++++++-------------
+ clang/test/Driver/xray-function-groups.cpp |   7 ++
+ 3 files changed, 47 insertions(+), 74 deletions(-)
+ create mode 100644 clang/test/Driver/xray-function-groups.cpp
+
+diff --git a/clang/include/clang/Driver/XRayArgs.h b/clang/include/clang/Driver/XRayArgs.h
+index 5779da50a1a0..bdd3d979547e 100644
+--- a/clang/include/clang/Driver/XRayArgs.h
++++ b/clang/include/clang/Driver/XRayArgs.h
+@@ -26,14 +26,7 @@ class XRayArgs {
+   std::vector<std::string> Modes;
+   XRayInstrSet InstrumentationBundle;
+   llvm::opt::Arg *XRayInstrument = nullptr;
+-  int InstructionThreshold = 200;
+-  bool XRayAlwaysEmitCustomEvents = false;
+-  bool XRayAlwaysEmitTypedEvents = false;
+   bool XRayRT = true;
+-  bool XRayIgnoreLoops = false;
+-  bool XRayFunctionIndex;
+-  int XRayFunctionGroups = 1;
+-  int XRaySelectedFunctionGroup = 0;
+ 
+ public:
+   /// Parses the XRay arguments from an argument list.
+diff --git a/clang/lib/Driver/XRayArgs.cpp b/clang/lib/Driver/XRayArgs.cpp
+index e975a72e4fe6..f15a91f1aba4 100644
+--- a/clang/lib/Driver/XRayArgs.cpp
++++ b/clang/lib/Driver/XRayArgs.cpp
+@@ -22,11 +22,7 @@ using namespace clang;
+ using namespace clang::driver;
+ using namespace llvm::opt;
+ 
+-namespace {
+-constexpr char XRayInstructionThresholdOption[] =
+-    "-fxray-instruction-threshold=";
+-constexpr const char *const XRaySupportedModes[] = {"xray-fdr", "xray-basic"};
+-} // namespace
++constexpr const char *XRaySupportedModes[] = {"xray-fdr", "xray-basic"};
+ 
+ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+   const Driver &D = TC.getDriver();
+@@ -77,36 +73,10 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+     D.Diag(diag::err_drv_argument_not_allowed_with)
+         << XRayInstrument->getSpelling() << A->getSpelling();
+ 
+-  if (const Arg *A =
+-          Args.getLastArg(options::OPT_fxray_instruction_threshold_EQ)) {
+-    StringRef S = A->getValue();
+-    if (S.getAsInteger(0, InstructionThreshold) || InstructionThreshold < 0)
+-      D.Diag(clang::diag::err_drv_invalid_value) << A->getAsString(Args) << S;
+-  }
+-
+-  // By default, the back-end will not emit the lowering for XRay customevent
+-  // calls if the function is not instrumented. In the future we will change
+-  // this default to be the reverse, but in the meantime we're going to
+-  // introduce the new functionality behind a flag.
+-  if (Args.hasFlag(options::OPT_fxray_always_emit_customevents,
+-                   options::OPT_fno_xray_always_emit_customevents, false))
+-    XRayAlwaysEmitCustomEvents = true;
+-
+-  if (Args.hasFlag(options::OPT_fxray_always_emit_typedevents,
+-                   options::OPT_fno_xray_always_emit_typedevents, false))
+-    XRayAlwaysEmitTypedEvents = true;
+-
+   if (!Args.hasFlag(options::OPT_fxray_link_deps,
+                     options::OPT_fnoxray_link_deps, true))
+     XRayRT = false;
+ 
+-  if (Args.hasFlag(options::OPT_fxray_ignore_loops,
+-                   options::OPT_fno_xray_ignore_loops, false))
+-    XRayIgnoreLoops = true;
+-
+-  XRayFunctionIndex = Args.hasFlag(options::OPT_fxray_function_index,
+-                                   options::OPT_fno_xray_function_index, true);
+-
+   auto Bundles =
+       Args.getAllArgValues(options::OPT_fxray_instrumentation_bundle);
+   if (Bundles.empty())
+@@ -185,21 +155,6 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+           Modes.push_back(std::string(M));
+     }
+ 
+-  if (const Arg *A = Args.getLastArg(options::OPT_fxray_function_groups)) {
+-    StringRef S = A->getValue();
+-    if (S.getAsInteger(0, XRayFunctionGroups) || XRayFunctionGroups < 1)
+-      D.Diag(clang::diag::err_drv_invalid_value) << A->getAsString(Args) << S;
+-  }
+-
+-  if (const Arg *A =
+-          Args.getLastArg(options::OPT_fxray_selected_function_group)) {
+-    StringRef S = A->getValue();
+-    if (S.getAsInteger(0, XRaySelectedFunctionGroup) ||
+-        XRaySelectedFunctionGroup < 0 ||
+-        XRaySelectedFunctionGroup >= XRayFunctionGroups)
+-      D.Diag(clang::diag::err_drv_invalid_value) << A->getAsString(Args) << S;
+-  }
+-
+   // Then we want to sort and unique the modes we've collected.
+   llvm::sort(Modes);
+   Modes.erase(std::unique(Modes.begin(), Modes.end()), Modes.end());
+@@ -209,34 +164,52 @@ void XRayArgs::addArgs(const ToolChain &TC, const ArgList &Args,
+                        ArgStringList &CmdArgs, types::ID InputType) const {
+   if (!XRayInstrument)
+     return;
+-
++  const Driver &D = TC.getDriver();
+   XRayInstrument->render(Args, CmdArgs);
+ 
+-  if (XRayAlwaysEmitCustomEvents)
+-    CmdArgs.push_back("-fxray-always-emit-customevents");
++  // By default, the back-end will not emit the lowering for XRay customevent
++  // calls if the function is not instrumented. In the future we will change
++  // this default to be the reverse, but in the meantime we're going to
++  // introduce the new functionality behind a flag.
++  Args.addOptInFlag(CmdArgs, options::OPT_fxray_always_emit_customevents,
++                    options::OPT_fno_xray_always_emit_customevents);
+ 
+-  if (XRayAlwaysEmitTypedEvents)
+-    CmdArgs.push_back("-fxray-always-emit-typedevents");
++  Args.addOptInFlag(CmdArgs, options::OPT_fxray_always_emit_typedevents,
++                    options::OPT_fno_xray_always_emit_typedevents);
++  Args.addOptInFlag(CmdArgs, options::OPT_fxray_ignore_loops,
++                    options::OPT_fno_xray_ignore_loops);
++  Args.addOptOutFlag(CmdArgs, options::OPT_fxray_function_index,
++                     options::OPT_fno_xray_function_index);
+ 
+-  if (XRayIgnoreLoops)
+-    CmdArgs.push_back("-fxray-ignore-loops");
+-
+-  if (!XRayFunctionIndex)
+-    CmdArgs.push_back("-fno-xray-function-index");
+-
+-  if (XRayFunctionGroups > 1) {
+-    CmdArgs.push_back(Args.MakeArgString(Twine("-fxray-function-groups=") +
+-                                         Twine(XRayFunctionGroups)));
++  if (const Arg *A =
++          Args.getLastArg(options::OPT_fxray_instruction_threshold_EQ)) {
++    int Value;
++    StringRef S = A->getValue();
++    if (S.getAsInteger(0, Value) || Value < 0)
++      D.Diag(clang::diag::err_drv_invalid_value) << A->getAsString(Args) << S;
++    else
++      A->render(Args, CmdArgs);
+   }
+ 
+-  if (XRaySelectedFunctionGroup != 0) {
+-    CmdArgs.push_back(
+-        Args.MakeArgString(Twine("-fxray-selected-function-group=") +
+-                           Twine(XRaySelectedFunctionGroup)));
++  int XRayFunctionGroups = 1;
++  int XRaySelectedFunctionGroup = 0;
++  if (const Arg *A = Args.getLastArg(options::OPT_fxray_function_groups)) {
++    StringRef S = A->getValue();
++    if (S.getAsInteger(0, XRayFunctionGroups) || XRayFunctionGroups < 1)
++      D.Diag(clang::diag::err_drv_invalid_value) << A->getAsString(Args) << S;
++    if (XRayFunctionGroups > 1)
++      A->render(Args, CmdArgs);
++  }
++  if (const Arg *A =
++          Args.getLastArg(options::OPT_fxray_selected_function_group)) {
++    StringRef S = A->getValue();
++    if (S.getAsInteger(0, XRaySelectedFunctionGroup) ||
++        XRaySelectedFunctionGroup < 0 ||
++        XRaySelectedFunctionGroup >= XRayFunctionGroups)
++      D.Diag(clang::diag::err_drv_invalid_value) << A->getAsString(Args) << S;
++    if (XRaySelectedFunctionGroup != 0)
++      A->render(Args, CmdArgs);
+   }
+-
+-  CmdArgs.push_back(Args.MakeArgString(Twine(XRayInstructionThresholdOption) +
+-                                       Twine(InstructionThreshold)));
+ 
+   for (const auto &Always : AlwaysInstrumentFiles) {
+     SmallString<64> AlwaysInstrumentOpt("-fxray-always-instrument=");
+diff --git a/clang/test/Driver/xray-function-groups.cpp b/clang/test/Driver/xray-function-groups.cpp
+new file mode 100644
+index 000000000000..4dab5f5364ad
+--- /dev/null
++++ b/clang/test/Driver/xray-function-groups.cpp
+@@ -0,0 +1,7 @@
++// RUN: %clang -### --target=aarch64-unknown-linux-gnu -fxray-instrument -fxray-function-groups=3 %s 2>&1 | FileCheck %s --check-prefix=GROUP0
++// RUN: %clang -### --target=x86_64-unknown-linux-gnu -fxray-instrument -fxray-function-groups=3 -fxray-selected-function-group=0 %s 2>&1 | FileCheck %s --check-prefix=GROUP0
++// RUN: %clang -### --target=x86_64-unknown-linux-gnu -fxray-instrument -fxray-function-groups=3 -fxray-selected-function-group=1 %s 2>&1 | FileCheck %s --check-prefix=GROUP1
++
++// GROUP0: "-fxray-function-groups=3"
++// GROUP0-NOT: "-fxray-selected-function-group=
++// GROUP1: "-fxray-function-groups=3" "-fxray-selected-function-group=1"
+-- 
+2.39.3
+

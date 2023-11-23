@@ -1,0 +1,115 @@
+From 84fe8ad2954c840efd5e4a0092eff0cf25ddbfc9 Mon Sep 17 00:00:00 2001
+From: Oleksii Lozovskyi <me@ilammy.net>
+Date: Thu, 22 Jun 2023 18:41:07 -0700
+Subject: [PATCH] [compiler-rt][CMake] Multiarch build of XRay libraries
+
+Instead of dumping all sources into RTXray object library with a weird
+special case for x86, handle multiarch builds better. Build a separate
+object library for each arch with its arch-specific sources, then link
+in all those libraries.
+
+This fixes the build on platforms that produce fat binaries, such as new
+macOS which expects both x86_64 and aarch64 objects in the same library
+since Apple Silicon is a thing.
+
+This only enables building XRay support for Apple Silicon. It does not
+actually work yet on macOS, neither on Intel nor on Apple Silicon CPUs.
+Thus the tests are still disabled.
+
+Reviewed By: MaskRay, phosek
+
+Differential Revision: https://reviews.llvm.org/D153221
+
+Change-Id: I53769a5a1c58b0998fc114addc4fe304950c3895
+---
+ .../cmake/Modules/AllSupportedArchDefs.cmake  |  2 +-
+ compiler-rt/lib/xray/CMakeLists.txt           | 36 +++++++++++++++----
+ 2 files changed, 31 insertions(+), 7 deletions(-)
+
+diff --git a/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake b/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
+index 3e86cf63c789..1ad8a6bbbbb6 100644
+--- a/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
++++ b/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
+@@ -71,7 +71,7 @@ set(ALL_SCUDO_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${MIPS32}
+ set(ALL_SCUDO_STANDALONE_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64}
+     ${MIPS32} ${MIPS64} ${PPC64} ${HEXAGON})
+ if(APPLE)
+-set(ALL_XRAY_SUPPORTED_ARCH ${X86_64})
++set(ALL_XRAY_SUPPORTED_ARCH ${X86_64} ${ARM64})
+ else()
+ set(ALL_XRAY_SUPPORTED_ARCH ${X86_64} ${ARM32} ${ARM64} ${MIPS32} ${MIPS64}
+ 		powerpc64le ${HEXAGON})
+diff --git a/compiler-rt/lib/xray/CMakeLists.txt b/compiler-rt/lib/xray/CMakeLists.txt
+index b7a65198a2ae..38eeae29f933 100644
+--- a/compiler-rt/lib/xray/CMakeLists.txt
++++ b/compiler-rt/lib/xray/CMakeLists.txt
+@@ -78,6 +78,19 @@ set(hexagon_SOURCES
+   xray_trampoline_hexagon.S
+   )
+ 
++set(XRAY_SOURCE_ARCHS
++  arm
++  armhf
++  aarch64
++  hexagon
++  mips
++  mipsel
++  mips64
++  mips64el
++  powerpc64le
++  x86_64
++  )
++
+ set(XRAY_IMPL_HEADERS
+   xray_allocator.h
+   xray_basic_flags.h
+@@ -166,19 +179,32 @@ if (TARGET cxx-headers OR HAVE_LIBCXX)
+ endif()
+ 
+ if (APPLE)
+-  add_asm_sources(XRAY_ASM_SOURCES xray_trampoline_x86_64.S)
+-
+   add_weak_symbols("sanitizer_common" WEAK_SYMBOL_LINK_FLAGS)
+   add_weak_symbols("xray" WEAK_SYMBOL_LINK_FLAGS)
+ 
+   add_compiler_rt_object_libraries(RTXray
+     OS ${XRAY_SUPPORTED_OS}
+     ARCHS ${XRAY_SUPPORTED_ARCH}
+-    SOURCES ${XRAY_SOURCES} ${x86_64_SOURCES}
++    SOURCES ${XRAY_SOURCES}
+     ADDITIONAL_HEADERS ${XRAY_IMPL_HEADERS}
+     CFLAGS ${XRAY_CFLAGS}
+     DEFS ${XRAY_COMMON_DEFINITIONS}
+     DEPS ${XRAY_DEPS})
++  set(XRAY_RTXRAY_ARCH_LIBS "")
++  foreach(arch ${XRAY_SUPPORTED_ARCH})
++    if(NOT ${arch} IN_LIST XRAY_SOURCE_ARCHS)
++      continue()
++    endif()
++    add_compiler_rt_object_libraries(RTXray_${arch}
++      OS ${XRAY_SUPPORTED_OS}
++      ARCHS ${arch}
++      SOURCES ${${arch}_SOURCES}
++      ADDITIONAL_HEADERS ${XRAY_IMPL_HEADERS}
++      CFLAGS ${XRAY_CFLAGS}
++      DEFS ${XRAY_COMMON_DEFINITIONS}
++      DEPS ${XRAY_DEPS})
++    list(APPEND XRAY_RTXRAY_ARCH_LIBS RTXray_${arch})
++  endforeach()
+   add_compiler_rt_object_libraries(RTXrayFDR
+     OS ${XRAY_SUPPORTED_OS}
+     ARCHS ${XRAY_SUPPORTED_ARCH}
+@@ -209,9 +235,7 @@ if (APPLE)
+     STATIC
+     OS ${XRAY_SUPPORTED_OS}
+     ARCHS ${XRAY_SUPPORTED_ARCH}
+-    OBJECT_LIBS RTXray
+-                RTSanitizerCommon
+-                RTSanitizerCommonLibc
++    OBJECT_LIBS ${XRAY_COMMON_RUNTIME_OBJECT_LIBS} RTXray ${XRAY_RTXRAY_ARCH_LIBS}
+     CFLAGS ${XRAY_CFLAGS}
+     DEFS ${XRAY_COMMON_DEFINITIONS}
+     LINK_FLAGS ${XRAY_LINK_FLAGS} ${WEAK_SYMBOL_LINK_FLAGS}
+-- 
+2.39.3
+

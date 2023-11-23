@@ -1,0 +1,75 @@
+From 471cc96215285e14957473bf18d54e71e2a184da Mon Sep 17 00:00:00 2001
+From: Xu Mingjie <xumingjie.enna1@bytedance.com>
+Date: Wed, 18 Aug 2021 12:17:09 +0800
+Subject: [PATCH] [NFC][llvm-xray] add a llvm-xray convert option `no-demangle`
+
+When option `--symbolize` is true, llvm-xray convert will demangle function
+name on default. This patch adds a llvm-xray convert option `no-demangle` to
+determine whether to demangle function name when symbolizing function ids from
+the input log.
+
+Reviewed By: MaskRay, smeenai
+
+Differential Revision: https://reviews.llvm.org/D108019
+---
+ .../llvm-xray/X86/convert-with-debug-syms.txt  | 18 ++++++++++++++++++
+ llvm/tools/llvm-xray/xray-converter.cpp        | 10 +++++++++-
+ 2 files changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt b/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
+index dd601486b2fb..fd6695a795f6 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
+@@ -15,3 +15,21 @@
+ ; CHECK-NEXT:   - { type: 0, func-id: 1, function: {{.*bar.*}}, cpu: 37, thread: 84697, kind: function-exit, tsc: 3315356841454802, data: '' }
+ ; CHECK-NEXT:   - { type: 0, func-id: 3, function: main, cpu: 37, thread: 84697, kind: function-exit, tsc: 3315356841494828, data: '' }
+ ; CHECK-NEXT: ...
++
++; RUN: llvm-xray convert -m %S/Inputs/elf64-sample-o2.bin --symbolize --no-demangle %S/Inputs/naive-log-simple.xray -f=yaml -o - 2>&1 | FileCheck --check-prefix=MANGLED %s
++
++; MANGLED:      ---
++; MANGLED-NEXT: header:
++; MANGLED-NEXT:   version:         1
++; MANGLED-NEXT:   type:            0
++; MANGLED-NEXT:   constant-tsc:    true
++; MANGLED-NEXT:   nonstop-tsc:     true
++; MANGLED-NEXT:   cycle-frequency: 2601000000
++; MANGLED-NEXT: records:
++; MANGLED-NEXT:   - { type: 0, func-id: 3, function: main, cpu: 37, thread: 84697, kind: function-enter, tsc: 3315356841453914, data: '' }
++; MANGLED-NEXT:   - { type: 0, func-id: 2, function: _Z3foov, cpu: 37, thread: 84697, kind: function-enter, tsc: 3315356841454542, data: '' }
++; MANGLED-NEXT:   - { type: 0, func-id: 2, function: _Z3foov, cpu: 37, thread: 84697, kind: function-exit, tsc: 3315356841454670, data: '' }
++; MANGLED-NEXT:   - { type: 0, func-id: 1, function: _Z3barv, cpu: 37, thread: 84697, kind: function-enter, tsc: 3315356841454762, data: '' }
++; MANGLED-NEXT:   - { type: 0, func-id: 1, function: _Z3barv, cpu: 37, thread: 84697, kind: function-exit, tsc: 3315356841454802, data: '' }
++; MANGLED-NEXT:   - { type: 0, func-id: 3, function: main, cpu: 37, thread: 84697, kind: function-exit, tsc: 3315356841494828, data: '' }
++; MANGLED-NEXT: ...
+diff --git a/llvm/tools/llvm-xray/xray-converter.cpp b/llvm/tools/llvm-xray/xray-converter.cpp
+index c1a623f0f858..974471781804 100644
+--- a/llvm/tools/llvm-xray/xray-converter.cpp
++++ b/llvm/tools/llvm-xray/xray-converter.cpp
+@@ -57,6 +57,11 @@ static cl::opt<bool>
+                      cl::init(false), cl::sub(Convert));
+ static cl::alias ConvertSymbolize2("y", cl::aliasopt(ConvertSymbolize),
+                                    cl::desc("Alias for -symbolize"));
++static cl::opt<bool>
++    NoDemangle("no-demangle",
++               cl::desc("determines whether to demangle function name "
++                        "when symbolizing function ids from the input log"),
++               cl::init(false), cl::sub(Convert));
+ 
+ static cl::opt<std::string>
+     ConvertInstrMap("instr_map",
+@@ -375,7 +380,10 @@ static CommandRegistration Unused(&Convert, []() -> Error {
+   }
+ 
+   const auto &FunctionAddresses = Map.getFunctionAddresses();
+-  symbolize::LLVMSymbolizer Symbolizer;
++  symbolize::LLVMSymbolizer::Options SymbolizerOpts;
++  if (NoDemangle)
++    SymbolizerOpts.Demangle = false;
++  symbolize::LLVMSymbolizer Symbolizer(SymbolizerOpts);
+   llvm::xray::FuncIdConversionHelper FuncIdHelper(ConvertInstrMap, Symbolizer,
+                                                   FunctionAddresses);
+   llvm::xray::TraceConverter TC(FuncIdHelper, ConvertSymbolize);
+-- 
+2.39.3
+

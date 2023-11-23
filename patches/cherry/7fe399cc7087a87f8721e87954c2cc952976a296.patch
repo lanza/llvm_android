@@ -1,0 +1,44 @@
+From 7fe399cc7087a87f8721e87954c2cc952976a296 Mon Sep 17 00:00:00 2001
+From: Vitaly Buka <vitalybuka@google.com>
+Date: Thu, 11 May 2023 23:56:41 -0700
+Subject: [PATCH] Revert "[NFC][xray] Initialize XRayFileHeader" Revert "[xray]
+ Ignore -Wc++20-extensions in xray_records.h [NFC]"
+
+Not needed. The fix is 3826a74fc7ad589e268b267d9323d4d416c5f6e9.
+
+This reverts commit 231c1d4134513e5a97cfdc874e8bda488ad59699.
+This reverts commit 7f191e6d2c9ec4af1819c4e80a5453583cd72f08.
+---
+ compiler-rt/include/xray/xray_records.h | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/compiler-rt/include/xray/xray_records.h b/compiler-rt/include/xray/xray_records.h
+index 268c653d6b2d..89ccb4df2bde 100644
+--- a/compiler-rt/include/xray/xray_records.h
++++ b/compiler-rt/include/xray/xray_records.h
+@@ -43,19 +43,16 @@ struct alignas(32) XRayFileHeader {
+   // have different files for different information being stored.
+   uint16_t Type = 0;
+ 
+-  #pragma clang diagnostic push
+-  #pragma clang diagnostic ignored "-Wc++20-extensions"
+   // What follows are a set of flags that indicate useful things for when
+   // reading the data in the file.
+-  bool ConstantTSC : 1 = false;
+-  bool NonstopTSC : 1 = false;
+-  #pragma clang diagnostic pop
++  bool ConstantTSC : 1;
++  bool NonstopTSC : 1;
+ 
+   // The frequency by which TSC increases per-second.
+   alignas(8) uint64_t CycleFrequency = 0;
+ 
+   union {
+-    char FreeForm[16] = {};
++    char FreeForm[16];
+     // The current civiltime timestamp, as retrieved from 'clock_gettime'. This
+     // allows readers of the file to determine when the file was created or
+     // written down.
+-- 
+2.39.3
+

@@ -1,0 +1,58 @@
+From 204ea214b498f7ab45f14b433b602a8270c350d8 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Sun, 18 Jun 2023 17:49:53 -0700
+Subject: [PATCH] [MC] flushPendingLabels: set Atom for new fragment after
+ D71368
+
+Fixes: c26c5e47ab9ca60835f191c90fa751e9a7dd0f3d (essentially a no-op)
+
+The newly created MCDataFragment should inherit Atom (see
+MCMachOStreamer::finishImpl). To the best of my knowledge, this change cannot be
+tested at present, but this is important to ensure
+MCExpr.cpp:AttemptToFoldSymbolOffsetDifference gives the same result in case we
+evaluate the expression again with a MCAsmLayout.
+
+In the following case,
+```
+.section __DATA,xray_instr_map
+lxray_sleds_start1:
+.space 16
+Lxray_sleds_end1:
+.section __DATA,xray_fn_idx
+.quad (Lxray_sleds_end1-lxray_sleds_start1)>>4 // can be folded without a MCAsmLayout
+```
+
+When we have a MCAsmLayout, without this change, evaluating
+(Lxray_sleds_end1-lxray_sleds_start1)>>4 again will fail due to
+`FA->getAtom() == nullptr && FB.getAtom() != nullptr` in
+MachObjectWriter::isSymbolRefDifferenceFullyResolvedImpl, called by
+AttemptToFoldSymbolOffsetDifference.
+---
+ llvm/lib/MC/MCSection.cpp | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/llvm/lib/MC/MCSection.cpp b/llvm/lib/MC/MCSection.cpp
+index 10d925c9efc8..fa8d638496be 100644
+--- a/llvm/lib/MC/MCSection.cpp
++++ b/llvm/lib/MC/MCSection.cpp
+@@ -118,11 +118,13 @@ void MCSection::flushPendingLabels() {
+     PendingLabel& Label = PendingLabels[0];
+     iterator CurInsertionPoint =
+       this->getSubsectionInsertionPoint(Label.Subsection);
+-    MCFragment *F = new MCDataFragment();
+-    getFragmentList().insert(CurInsertionPoint, F);
+-    F->setParent(this);
++    const MCSymbol *Atom = nullptr;
+     if (CurInsertionPoint != begin())
+-      F->setAtom(std::prev(CurInsertionPoint)->getAtom());
++      Atom = std::prev(CurInsertionPoint)->getAtom();
++    MCFragment *F = new MCDataFragment();
++    getFragmentList().insert(CurInsertionPoint, F);
++    F->setParent(this);
++    F->setAtom(Atom);
+     flushPendingLabels(F, 0, Label.Subsection);
+   }
+ }
+-- 
+2.39.3
+

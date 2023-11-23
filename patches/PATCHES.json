@@ -1,11 +1,5 @@
 [
     {
-        "comment": "[UPSTREAM] [xray] Honor xray-never function-instrument attribute",
-        "rel_patch_path": "cherry/d72a6e95a2450e2e76e2eee072ccb319f4f38b2e.patch",
-        "start_version": 416183,
-        "end_version": 416185
-    },
-    {
         "comment": "[UPSTREAM] Revert \"[MachineDebugify] Insert synthetic DBG_VALUE instructions\"",
         "rel_patch_path": "cherry/841f9c937f6e593c926a26aedf054436eb807fe6.patch",
         "start_version": 412851,
@@ -40,12 +34,6 @@
         "rel_patch_path": "cherry/c82deed6764cbc63966374baf9721331901ca958.patch",
         "start_version": 407598,
         "end_version": 415963
-    },
-    {
-        "comment": "[UPSTREAM] Fixes to turn on XRay on Android",
-        "rel_patch_path": "cherry/53e7ab5d5a0059347f9237b8d349d4038f21e309.patch",
-        "start_version": 416183,
-        "end_version": 416184
     },
     {
         "comment": "[UPSTREAM] Revert \"[SLP]Merge reorder and reuse shuffles.\"",
@@ -153,7 +141,7 @@
         "comment": "[UPSTREAM] [libunwind] unw_* alias fixes for ELF and Mach-O",
         "rel_patch_path": "cherry/729899f7b6bf6aff65988d895d7a639391a67608.patch",
         "start_version": 416183,
-        "end_version": 419703
+        "end_version": 416187
     },
     {
         "comment": "[UPSTREAM] [THUMB2] add .w suffixes for ldr/str (immediate) T4",
@@ -352,5 +340,383 @@
         "rel_patch_path": "Revert-babd3aefc91-and-6-changes-after-it.patch",
         "start_version": 416183,
         "end_version": null
+    },
+    {
+        "comment": "[UPSTREAM] Fixes to turn on XRay on Android",
+        "rel_patch_path": "cherry/53e7ab5d5a0059347f9237b8d349d4038f21e309.patch",
+        "start_version": 416183,
+        "end_version": 416184
+    },
+    {
+        "comment": "[UPSTREAM] [xray] Honor xray-never function-instrument attribute",
+        "rel_patch_path": "cherry/d72a6e95a2450e2e76e2eee072ccb319f4f38b2e.patch",
+        "start_version": 416183,
+        "end_version": 416185
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Make __xray_customevent support non-Linux",
+        "rel_patch_path": "cherry/c49ee73ecdd9a82146b9a1cffc39d83f2cb93343.patch",
+        "start_version": 416183,
+        "end_version": 416189
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Support DW_TAG_call_site and delete unneeded PATCHABLE_EVENT_CALL/PATCHABLE_TYPED_EVENT_CALL lowering",
+        "rel_patch_path": "cherry/e15e3a8fc15c6ad39397d4e0294ce89e3aafb4ad.patch",
+        "start_version": 416183,
+        "end_version": 416190
+    },
+    {
+        "comment": "[UPSTREAM] Fix xray fdr mode to allow multiple flushes",
+        "rel_patch_path": "cherry/fd856085c684cc8e254f50173db2ab45f2f4c50d.patch",
+        "start_version": 416183,
+        "end_version": 416191
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][x86_64] Fix CFI directives in assembly trampolines",
+        "rel_patch_path": "cherry/7810c20bc3c64aab2f47a070342cc29293381b2e.patch",
+        "start_version": 416183,
+        "end_version": 416192
+    },
+    {
+        "comment": "[UPSTREAM] Revert \"[XRay][x86_64] Fix CFI directives in assembly trampolines\"",
+        "rel_patch_path": "cherry/a6a8926db751d3f13390eb2535b50bc4a42589ac.patch",
+        "start_version": 416183,
+        "end_version": 416193
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][compiler-rt][x86_64] Fix CFI directives in assembly trampolines",
+        "rel_patch_path": "cherry/02c10100cdd445d425eeaa0160b9dcf9a5e7206f.patch",
+        "start_version": 416183,
+        "end_version": 416194
+    },
+    {
+        "comment": "[UPSTREAM] [xray] Fix xray document spelling",
+        "rel_patch_path": "cherry/7d3e8ae1436f7b546c6b44b846324dba604007fd.patch",
+        "start_version": 416183,
+        "end_version": 416195
+    },
+    {
+        "comment": "[UPSTREAM] Revert \"[InstCombine] Fold `((X - Y) - Z)` to `X - (Y + Z)` (PR49858)\"",
+        "rel_patch_path": "cherry/9b7df685dbfdd3c0673659eac272f6bc32e4cb40.patch",
+        "start_version": 416183,
+        "end_version": 416196
+    },
+    {
+        "comment": "[UPSTREAM] scudo: fix CheckFailed-related build breakage",
+        "rel_patch_path": "cherry/484288d09a0e04fa30d24c131f2ab87dc2bece99.patch",
+        "start_version": 416183,
+        "end_version": 416197
+    },
+    {
+        "comment": "[UPSTREAM] xray-color-helper.h - sort includes. NFCI.",
+        "rel_patch_path": "cherry/4c7b08112726e02e1d9f2d7c6fd7a822368aab16.patch",
+        "start_version": 416183,
+        "end_version": 416198
+    },
+    {
+        "comment": "[UPSTREAM] xray-color-helper.cpp - add missing implicit cmath header dependency. NFCI.",
+        "rel_patch_path": "cherry/51b568748d147dde41300c380b5221ac01d890b9.patch",
+        "start_version": 416183,
+        "end_version": 416199
+    },
+    {
+        "comment": "[UPSTREAM] [compiler-rt][iwyu] explicitly includes `<new>` in xray_utils.cpp",
+        "rel_patch_path": "cherry/4169d1eb10bfafc2f16507ea5ccb2dbd5cc580fd.patch",
+        "start_version": 416183,
+        "end_version": 416200
+    },
+    {
+        "comment": "[UPSTREAM] [test] Change llvm-xray options to use the preferred double-dash forms and change -f= to -f",
+        "rel_patch_path": "cherry/7e19a012dc8531543eee4510c500a9f7a31effc4.patch",
+        "start_version": 416183,
+        "end_version": 416201
+    },
+    {
+        "comment": "[UPSTREAM] [NFC][llvm-xray] add a llvm-xray convert option `no-demangle`",
+        "rel_patch_path": "cherry/471cc96215285e14957473bf18d54e71e2a184da.patch",
+        "start_version": 416183,
+        "end_version": 416202
+    },
+    {
+        "comment": "[UPSTREAM] llvm-xray {convert,extract}: Add --demangle",
+        "rel_patch_path": "cherry/d630bd42399a7777ecfe393b1da1a2c9bb4454d5.patch",
+        "start_version": 416183,
+        "end_version": 416203
+    },
+    {
+        "comment": "[UPSTREAM] [gn build] Don't copy xray includes",
+        "rel_patch_path": "cherry/a49bcc79483812f00c10587703190c403cb7a5e6.patch",
+        "start_version": 416183,
+        "end_version": 416204
+    },
+    {
+        "comment": "[UPSTREAM] [Driver] Remove Separate form for XRay options",
+        "rel_patch_path": "cherry/c81e94edfc4771a7630cb1b62b7de7cab46f5890.patch",
+        "start_version": 416183,
+        "end_version": 416205
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] fix more -Wformat warnings",
+        "rel_patch_path": "cherry/d32ce6ac9db6b61cb3b01714976ee1646bdae4d4.patch",
+        "start_version": 416183,
+        "end_version": 416206
+    },
+    {
+        "comment": "[UPSTREAM] [xray] add support for hexagon",
+        "rel_patch_path": "cherry/498659566b790b9538c15d6bc7621455d9ba0962.patch",
+        "start_version": 416183,
+        "end_version": 416207
+    },
+    {
+        "comment": "[UPSTREAM] Reapply [xray] add support for hexagon",
+        "rel_patch_path": "cherry/7b5c8df34f2b75d6e15497d0a0b886eb5727c849.patch",
+        "start_version": 416183,
+        "end_version": 416208
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][test] Clean up llc RUN lines",
+        "rel_patch_path": "cherry/2ebcb63f27aff7f9c565971fd0697273fb9517e2.patch",
+        "start_version": 416183,
+        "end_version": 416209
+    },
+    {
+        "comment": "[UPSTREAM] [compiler-rt][xray] Disable fdr-reinit test on AArch64",
+        "rel_patch_path": "cherry/1ff0f62a06ca1e3f6679ca017d605e5d906e0e63.patch",
+        "start_version": 416183,
+        "end_version": 416210
+    },
+    {
+        "comment": "[UPSTREAM] [compiler-rt][xray] Disable fdr-reinit test on Arm",
+        "rel_patch_path": "cherry/f2f94d5b656586fef01cad0af9cc8213b7348047.patch",
+        "start_version": 416183,
+        "end_version": 416211
+    },
+    {
+        "comment": "[UPSTREAM] [CMake] Option to select C++ library for runtimes that use it",
+        "rel_patch_path": "cherry/92ba08e3680e7a99d5994499f5d6fddfd40281cb.patch",
+        "start_version": 416183,
+        "end_version": 416212
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Remove XRayRecordStorage",
+        "rel_patch_path": "cherry/93efbbd597ce19e6fd26f7b1ba5d4a4616532b08.patch",
+        "start_version": 416183,
+        "end_version": 416213
+    },
+    {
+        "comment": "[UPSTREAM] [xray] Convert tests to check 'target=...'",
+        "rel_patch_path": "cherry/f972aa72607c9fd9f3f2027ad742ff6c4b3d035b.patch",
+        "start_version": 416183,
+        "end_version": 416214
+    },
+    {
+        "comment": "[UPSTREAM] [clang/xray] Convert tests to check 'target=...'",
+        "rel_patch_path": "cherry/2cb44fe5d693b1371414c7abc03adb579b2969dc.patch",
+        "start_version": 416183,
+        "end_version": 416215
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Fix Hexagon sled version",
+        "rel_patch_path": "cherry/61fe7de054b7689d863af5c655c175e212872b15.patch",
+        "start_version": 416183,
+        "end_version": 416216
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Unsupport version<2 sled entry",
+        "rel_patch_path": "cherry/1ea3ff7c0acc9465eca52e73035af985b544089c.patch",
+        "start_version": 416183,
+        "end_version": 416217
+    },
+    {
+        "comment": "[UPSTREAM] [NFC][xray] Initialize XRayFileHeader",
+        "rel_patch_path": "cherry/90adec919e3003e9d703c41cdd6b7aa3d8cc2157.patch",
+        "start_version": 416183,
+        "end_version": 416218
+    },
+    {
+        "comment": "[UPSTREAM] [xray] Ignore -Wc++20-extensions in xray_records.h [NFC]",
+        "rel_patch_path": "cherry/6bfaeeb3f9e5da1909b0bbc7307dce24886bfb82.patch",
+        "start_version": 416183,
+        "end_version": 416219
+    },
+    {
+        "comment": "[UPSTREAM] [NFC][xray] Initialize XRayFileHeader",
+        "rel_patch_path": "cherry/9269d204e6610bf19a1aa6bca0ba6cbec3bce621.patch",
+        "start_version": 416183,
+        "end_version": 416220
+    },
+    {
+        "comment": "[UPSTREAM] Revert \"[NFC][xray] Initialize XRayFileHeader\" Revert \"[xray] Ignore -Wc++20-extensions in xray_records.h [NFC]\"",
+        "rel_patch_path": "cherry/7fe399cc7087a87f8721e87954c2cc952976a296.patch",
+        "start_version": 416183,
+        "end_version": 416221
+    },
+    {
+        "comment": "[UPSTREAM] [Driver] Simplify -fxray-instrument handling",
+        "rel_patch_path": "cherry/ee38228929852721fca3954e7cdab6a87abc8294.patch",
+        "start_version": 416183,
+        "end_version": 416222
+    },
+    {
+        "comment": "[UPSTREAM] [Driver] Simplify xray options",
+        "rel_patch_path": "cherry/afbc1080616d0649d20e8cdfb78551ca76dddeeb.patch",
+        "start_version": 416183,
+        "end_version": 416223
+    },
+    {
+        "comment": "[UPSTREAM] [AArch64][ARM][X86] Split XRay tests for Linux/macOS",
+        "rel_patch_path": "cherry/461be7ff0e4bcb2b40a1b9c04f629b3122edc894.patch",
+        "start_version": 416183,
+        "end_version": 416224
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Rename XRayOmitFunctionIndex to XRayFunctionIndex",
+        "rel_patch_path": "cherry/7fa532974074a7d1abec3f73aa5ec22f9eac9fb2.patch",
+        "start_version": 416183,
+        "end_version": 416225
+    },
+    {
+        "comment": "[UPSTREAM] [Driver] Default to -fxray-function-index",
+        "rel_patch_path": "cherry/8e5ef52fa1a65efd9bfef5a33969bf7c1222f29b.patch",
+        "start_version": 416183,
+        "end_version": 416226
+    },
+    {
+        "comment": "[UPSTREAM] [xray] Use L* instead of .L* for Mach-O",
+        "rel_patch_path": "cherry/04184afd33fb678a3964123847b59b88b4381cf8.patch",
+        "start_version": 416183,
+        "end_version": 416227
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][test] Make tests less sensitive to .Ltmp/Ltmp label changes",
+        "rel_patch_path": "cherry/4ab674e901572994491214163546b0742de3414a.patch",
+        "start_version": 416183,
+        "end_version": 416228
+    },
+    {
+        "comment": "[UPSTREAM] [MC] flushPendingLabels: set Atom for new fragment after D71368",
+        "rel_patch_path": "cherry/8e2b8b745dd9899ebf9199e74f6cb522ba57aff5.patch",
+        "start_version": 416183,
+        "end_version": 416229
+    },
+    {
+        "comment": "[UPSTREAM] [MC] flushPendingLabels: set Atom for new fragment after D71368",
+        "rel_patch_path": "cherry/204ea214b498f7ab45f14b433b602a8270c350d8.patch",
+        "start_version": 416183,
+        "end_version": 416230
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Mark Mach-O xray_instr_map and xray_fn_idx as S_ATTR_LIVE_SUPPORT",
+        "rel_patch_path": "cherry/dff9359daac153961ffcb6b719c221265af33a04.patch",
+        "start_version": 416183,
+        "end_version": 416231
+    },
+    {
+        "comment": "[UPSTREAM] [Driver] Correct -fnoxray-link-deps to -fno-xray-link-deps",
+        "rel_patch_path": "cherry/b01bae5542ee0c63c04121d1e5abdfcf21d962fd.patch",
+        "start_version": 416183,
+        "end_version": 416232
+    },
+    {
+        "comment": "[UPSTREAM] [xray][test] Test __xray_typedevent after D43668",
+        "rel_patch_path": "cherry/18c3d74b673cec21cbbafdf869207de532d03bc2.patch",
+        "start_version": 416183,
+        "end_version": 416233
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][X86] Remove sled version 0 support from patchCustomEvent",
+        "rel_patch_path": "cherry/a412263443cf70021ddc0bbee14648a08fdc8d56.patch",
+        "start_version": 416183,
+        "end_version": 416234
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Make llvm.xray.typedevent parameter type match __xray_typedevent",
+        "rel_patch_path": "cherry/2c9767c5baecb2f4857fbec67dc65649d491bfe8.patch",
+        "start_version": 416183,
+        "end_version": 416235
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Make llvm.xray.customevent parameter type match __xray_customevent",
+        "rel_patch_path": "cherry/e8a9569c3f8b1c4b3e8d66a72e90017b746d7105.patch",
+        "start_version": 416183,
+        "end_version": 416236
+    },
+    {
+        "comment": "[UPSTREAM] [xray][AArch64] Rewrite trampoline",
+        "rel_patch_path": "cherry/8397f5d5cd115f368caf30f8d4247a4e8e770e7f.patch",
+        "start_version": 416183,
+        "end_version": 416237
+    },
+    {
+        "comment": "[UPSTREAM] [Driver] Allow XRay for more architectures on ELF systems",
+        "rel_patch_path": "cherry/60f13aaf36885fb39aaceb439867f111f84e2882.patch",
+        "start_version": 416183,
+        "end_version": 416238
+    },
+    {
+        "comment": "[UPSTREAM] [Driver] Allow XRay on Apple Silicon",
+        "rel_patch_path": "cherry/710561992e5f6665c2e63f68f381c67b59bcb933.patch",
+        "start_version": 416183,
+        "end_version": 416239
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Make xray_fn_idx entries PC-relative",
+        "rel_patch_path": "cherry/fce6781400b567c91fc1a16436dad18001c2ac67.patch",
+        "start_version": 416183,
+        "end_version": 416240
+    },
+    {
+        "comment": "[UPSTREAM] [test] Add llvm-xray into XRAY_TEST_DEPS",
+        "rel_patch_path": "cherry/c0f064b9de8ab6c13e754e0373b7bca5b1af4641.patch",
+        "start_version": 416183,
+        "end_version": 416241
+    },
+    {
+        "comment": "[UPSTREAM] [XRay] Make xray_instr_map compatible with Mach-O",
+        "rel_patch_path": "cherry/b67b31a5253264f30dc7203876fdf7e579d6fb3e.patch",
+        "start_version": 416183,
+        "end_version": 416242
+    },
+    {
+        "comment": "[UPSTREAM] [compiler-rt][CMake] Multiarch build of XRay libraries",
+        "rel_patch_path": "cherry/84fe8ad2954c840efd5e4a0092eff0cf25ddbfc9.patch",
+        "start_version": 416183,
+        "end_version": 416243
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][AArch64] Suppport __xray_customevent/__xray_typedevent",
+        "rel_patch_path": "cherry/43314a2be1ab1d664d5b54ac922168d2a5192ef3.patch",
+        "start_version": 416183,
+        "end_version": 416244
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][AArch64] Add .size directive",
+        "rel_patch_path": "cherry/8f24965073f2177ac58491ee8728d082b7d2022d.patch",
+        "start_version": 416183,
+        "end_version": 416245
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][test] Replace some XFAIL with more appropriate REQUIRES",
+        "rel_patch_path": "cherry/3142c72e86038512d269630e856c9dfc67a11f13.patch",
+        "start_version": 416183,
+        "end_version": 416246
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][AArch64] Implement __xray_ArgLoggerEntry",
+        "rel_patch_path": "cherry/100cd8c4e4e564a3a5d2191fca5d8326742bb566.patch",
+        "start_version": 416183,
+        "end_version": 416247
+    },
+    {
+        "comment": "[UPSTREAM] [XRay][test] Remove unneeded REQUIRES: x86_64-target-arch",
+        "rel_patch_path": "cherry/d83298630797543ed47fbbdcd0dec4b686c7201d.patch",
+        "start_version": 416183,
+        "end_version": 416248
+    },
+    {
+        "comment": "[UPSTREAM] [compiler-rt][xray] Disable fdr-single-thread test on Arm",
+        "rel_patch_path": "cherry/f25382fbfc238390e5e9985e8ef2e9b50527746d.patch",
+        "start_version": 416183,
+        "end_version": 416249
     }
 ]

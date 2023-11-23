@@ -1,0 +1,177 @@
+From d32ce6ac9db6b61cb3b01714976ee1646bdae4d4 Mon Sep 17 00:00:00 2001
+From: Dimitry Andric <dimitry@andric.com>
+Date: Tue, 23 Nov 2021 21:21:02 +0100
+Subject: [PATCH] [XRay] fix more -Wformat warnings
+
+Building xray with recent clang on a 64-bit system results in a number
+of -Wformat warnings:
+
+    compiler-rt/lib/xray/xray_allocator.h:70:11: warning: format specifies type 'int' but the argument has type '__sanitizer::uptr' (aka 'unsigned long') [-Wformat]
+              RoundedSize, B);
+              ^~~~~~~~~~~
+    compiler-rt/lib/xray/xray_allocator.h:119:11: warning: format specifies type 'int' but the argument has type '__sanitizer::uptr' (aka 'unsigned long') [-Wformat]
+              RoundedSize, B);
+              ^~~~~~~~~~~
+
+Since `__sanitizer::uptr` has the same size as `size_t`, these can be
+fixed by using the printf specifier `%zu`.
+
+    compiler-rt/lib/xray/xray_basic_logging.cpp:348:46: warning: format specifies type 'int' but the argument has type '__sanitizer::tid_t' (aka 'unsigned long long') [-Wformat]
+          Report("Cleaned up log for TID: %d\n", GetTid());
+                                          ~~     ^~~~~~~~
+                                          %llu
+    compiler-rt/lib/xray/xray_basic_logging.cpp:353:62: warning: format specifies type 'int' but the argument has type '__sanitizer::tid_t' (aka 'unsigned long long') [-Wformat]
+          Report("Skipping buffer for TID: %d; Offset = %llu\n", GetTid(),
+                                           ~~                    ^~~~~~~~
+                                           %llu
+
+Since `__sanitizer::tid_t` is effectively declared as `unsigned long
+long`, these can be fixed by using the printf specifier `%llu`.
+
+    compiler-rt/lib/xray/xray_basic_logging.cpp:354:14: warning: format specifies type 'unsigned long long' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+                 TLD.BufferOffset);
+                 ^~~~~~~~~~~~~~~~
+
+Since `BufferOffset` is declared as `size_t`, this one can be fixed by
+using `%zu` as a printf specifier.
+
+    compiler-rt/lib/xray/xray_interface.cpp:172:50: warning: format specifies type 'int' but the argument has type 'uint64_t' (aka 'unsigned long') [-Wformat]
+        Report("Unsupported sled kind '%d' @%04x\n", Sled.Address, int(Sled.Kind));
+                                       ~~            ^~~~~~~~~~~~
+                                       %lu
+
+Since ``xray::SledEntry::Address` is declared as `uint64_t`, this one
+can be fixed by using `PRIu64`, and adding `<cinttypes>`.
+
+    compiler-rt/lib/xray/xray_interface.cpp:308:62: warning: format specifies type 'long long' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+        Report("System page size is not a power of two: %lld\n", PageSize);
+                                                        ~~~~     ^~~~~~~~
+                                                        %zu
+    compiler-rt/lib/xray/xray_interface.cpp:359:64: warning: format specifies type 'long long' but the argument has type 'size_t' (aka 'unsigned long') [-Wformat]
+        Report("Provided page size is not a power of two: %lld\n", PageSize);
+                                                          ~~~~     ^~~~~~~~
+                                                          %zu
+
+Since `PageSize` is declared as `size_t`, these can be fixed by using
+`%zu` as a printf specifier.
+
+Reviewed By: vitalybuka
+
+Differential Revision: https://reviews.llvm.org/D114469
+---
+ compiler-rt/lib/xray/xray_allocator.h       | 16 ++++++++--------
+ compiler-rt/lib/xray/xray_basic_logging.cpp |  4 ++--
+ compiler-rt/lib/xray/xray_interface.cpp     |  9 +++++----
+ 3 files changed, 15 insertions(+), 14 deletions(-)
+
+diff --git a/compiler-rt/lib/xray/xray_allocator.h b/compiler-rt/lib/xray/xray_allocator.h
+index 4b42c473261d..0284f4299fb1 100644
+--- a/compiler-rt/lib/xray/xray_allocator.h
++++ b/compiler-rt/lib/xray/xray_allocator.h
+@@ -65,9 +65,9 @@ template <class T> T *allocate() XRAY_NEVER_INSTRUMENT {
+   int ErrNo = 0;
+   if (UNLIKELY(internal_iserror(B, &ErrNo))) {
+     if (Verbosity())
+-      Report(
+-          "XRay Profiling: Failed to allocate memory of size %d; Error = %d.\n",
+-          RoundedSize, B);
++      Report("XRay Profiling: Failed to allocate memory of size %zu; Error = "
++             "%zu\n",
++             RoundedSize, B);
+     return nullptr;
+   }
+ #endif
+@@ -114,9 +114,9 @@ T *allocateBuffer(size_t S) XRAY_NEVER_INSTRUMENT {
+   int ErrNo = 0;
+   if (UNLIKELY(internal_iserror(B, &ErrNo))) {
+     if (Verbosity())
+-      Report(
+-          "XRay Profiling: Failed to allocate memory of size %d; Error = %d.\n",
+-          RoundedSize, B);
++      Report("XRay Profiling: Failed to allocate memory of size %zu; Error = "
++             "%zu\n",
++             RoundedSize, B);
+     return nullptr;
+   }
+ #endif
+@@ -183,7 +183,7 @@ private:
+       BackingStore = allocateBuffer(MaxMemory);
+       if (BackingStore == nullptr) {
+         if (Verbosity())
+-          Report("XRay Profiling: Failed to allocate memory for allocator.\n");
++          Report("XRay Profiling: Failed to allocate memory for allocator\n");
+         return nullptr;
+       }
+ 
+@@ -198,7 +198,7 @@ private:
+         AlignedNextBlock = BackingStore = nullptr;
+         if (Verbosity())
+           Report("XRay Profiling: Cannot obtain enough memory from "
+-                 "preallocated region.\n");
++                 "preallocated region\n");
+         return nullptr;
+       }
+ 
+diff --git a/compiler-rt/lib/xray/xray_basic_logging.cpp b/compiler-rt/lib/xray/xray_basic_logging.cpp
+index a58ae9b5e267..6e83252a0516 100644
+--- a/compiler-rt/lib/xray/xray_basic_logging.cpp
++++ b/compiler-rt/lib/xray/xray_basic_logging.cpp
+@@ -345,12 +345,12 @@ static void TLDDestructor(void *P) XRAY_NEVER_INSTRUMENT {
+     if (TLD.ShadowStack)
+       InternalFree(TLD.ShadowStack);
+     if (Verbosity())
+-      Report("Cleaned up log for TID: %d\n", GetTid());
++      Report("Cleaned up log for TID: %llu\n", GetTid());
+   });
+ 
+   if (TLD.LogWriter == nullptr || TLD.BufferOffset == 0) {
+     if (Verbosity())
+-      Report("Skipping buffer for TID: %d; Offset = %llu\n", GetTid(),
++      Report("Skipping buffer for TID: %llu; Offset = %zu\n", GetTid(),
+              TLD.BufferOffset);
+     return;
+   }
+diff --git a/compiler-rt/lib/xray/xray_interface.cpp b/compiler-rt/lib/xray/xray_interface.cpp
+index 7669b9ab82be..866b1ac90557 100644
+--- a/compiler-rt/lib/xray/xray_interface.cpp
++++ b/compiler-rt/lib/xray/xray_interface.cpp
+@@ -14,7 +14,7 @@
+ 
+ #include "xray_interface_internal.h"
+ 
+-#include <cstdint>
++#include <cinttypes>
+ #include <cstdio>
+ #include <errno.h>
+ #include <limits>
+@@ -169,7 +169,8 @@ bool patchSled(const XRaySledEntry &Sled, bool Enable,
+     Success = patchTypedEvent(Enable, FuncId, Sled);
+     break;
+   default:
+-    Report("Unsupported sled kind '%d' @%04x\n", Sled.Address, int(Sled.Kind));
++    Report("Unsupported sled kind '%" PRIu64 "' @%04x\n", Sled.Address,
++           int(Sled.Kind));
+     return false;
+   }
+   return Success;
+@@ -305,7 +306,7 @@ XRayPatchingStatus controlPatching(bool Enable) XRAY_NEVER_INSTRUMENT {
+                               ? flags()->xray_page_size_override
+                               : GetPageSizeCached();
+   if ((PageSize == 0) || ((PageSize & (PageSize - 1)) != 0)) {
+-    Report("System page size is not a power of two: %lld\n", PageSize);
++    Report("System page size is not a power of two: %zu\n", PageSize);
+     return XRayPatchingStatus::FAILED;
+   }
+ 
+@@ -356,7 +357,7 @@ XRayPatchingStatus mprotectAndPatchFunction(int32_t FuncId,
+                               ? flags()->xray_page_size_override
+                               : GetPageSizeCached();
+   if ((PageSize == 0) || ((PageSize & (PageSize - 1)) != 0)) {
+-    Report("Provided page size is not a power of two: %lld\n", PageSize);
++    Report("Provided page size is not a power of two: %zu\n", PageSize);
+     return XRayPatchingStatus::FAILED;
+   }
+ 
+-- 
+2.39.3
+

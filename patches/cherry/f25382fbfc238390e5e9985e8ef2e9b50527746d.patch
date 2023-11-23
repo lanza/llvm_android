@@ -1,0 +1,29 @@
+From f25382fbfc238390e5e9985e8ef2e9b50527746d Mon Sep 17 00:00:00 2001
+From: David Spickett <david.spickett@linaro.org>
+Date: Fri, 7 Jul 2023 09:46:07 +0000
+Subject: [PATCH] [compiler-rt][xray] Disable fdr-single-thread test on Arm
+
+For unknown reasons this casues a bus error.
+
+See:
+https://lab.llvm.org/buildbot/#/builders/178/builds/5157
+---
+ compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp b/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp
+index 94b21b50408f..b8803aedc885 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/fdr-single-thread.cpp
+@@ -8,6 +8,8 @@
+ // RUN:   "`ls fdr-logging-1thr-* | head -n1`" | FileCheck %s
+ // RUN: rm fdr-logging-1thr-*
+ 
++// UNSUPPORTED: target=arm{{.*}}
++
+ #include "xray/xray_log_interface.h"
+ #include <cassert>
+ 
+-- 
+2.39.3
+

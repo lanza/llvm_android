@@ -1,0 +1,29 @@
+From 4169d1eb10bfafc2f16507ea5ccb2dbd5cc580fd Mon Sep 17 00:00:00 2001
+From: Christopher Di Bella <cjdb@google.com>
+Date: Sun, 4 Jul 2021 02:20:10 +0000
+Subject: [PATCH] [compiler-rt][iwyu] explicitly includes `<new>` in
+ xray_utils.cpp
+
+Compiling compiler-rt with Clang modules and libc++ revealed that the
+global `operator new` is being called without including `<new>`.
+
+Differential Revision: https://reviews.llvm.org/D105401
+---
+ compiler-rt/lib/xray/xray_utils.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/compiler-rt/lib/xray/xray_utils.cpp b/compiler-rt/lib/xray/xray_utils.cpp
+index 4c8ad5b92be7..befbabfe4532 100644
+--- a/compiler-rt/lib/xray/xray_utils.cpp
++++ b/compiler-rt/lib/xray/xray_utils.cpp
+@@ -20,6 +20,7 @@
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <iterator>
++#include <new>
+ #include <stdlib.h>
+ #include <sys/types.h>
+ #include <tuple>
+-- 
+2.39.3
+

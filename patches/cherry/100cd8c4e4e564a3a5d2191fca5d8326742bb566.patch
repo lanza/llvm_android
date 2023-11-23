@@ -1,0 +1,180 @@
+From 100cd8c4e4e564a3a5d2191fca5d8326742bb566 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Wed, 5 Jul 2023 20:56:00 -0700
+Subject: [PATCH] [XRay][AArch64] Implement __xray_ArgLoggerEntry
+
+---
+ compiler-rt/lib/xray/xray_AArch64.cpp         | 10 +----
+ .../lib/xray/xray_trampoline_AArch64.S        | 38 +++++++++++++++++--
+ .../TestCases/Posix/arg1-arg0-logging.cpp     |  2 +-
+ .../test/xray/TestCases/Posix/arg1-logger.cpp |  2 +-
+ .../Posix/arg1-logging-implicit-this.cpp      |  4 +-
+ llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp |  2 +-
+ 6 files changed, 42 insertions(+), 16 deletions(-)
+
+diff --git a/compiler-rt/lib/xray/xray_AArch64.cpp b/compiler-rt/lib/xray/xray_AArch64.cpp
+index 8cc54016a292..c1d77758946e 100644
+--- a/compiler-rt/lib/xray/xray_AArch64.cpp
++++ b/compiler-rt/lib/xray/xray_AArch64.cpp
+@@ -24,7 +24,6 @@ namespace __xray {
+ // The machine codes for some instructions used in runtime patching.
+ enum class PatchOpcodes : uint32_t {
+   PO_StpX0X30SP_m16e = 0xA9BF7BE0, // STP X0, X30, [SP, #-16]!
+-  PO_LdrW0_12 = 0x18000060,        // LDR W0, #12
+   PO_LdrX16_12 = 0x58000070,       // LDR X16, #12
+   PO_BlrX16 = 0xD63F0200,          // BLR X16
+   PO_LdpX0X30SP_16 = 0xA8C17BE0,   // LDP X0, X30, [SP], #16
+@@ -45,7 +44,7 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
+   //
+   // xray_sled_n:
+   //   STP X0, X30, [SP, #-16]! ; PUSH {r0, lr}
+-  //   LDR W0, #12 ; W0 := function ID
++  //   LDR W17, #12 ; W17 := function ID
+   //   LDR X16,#12 ; X16 := address of the trampoline
+   //   BLR X16
+   //   ;DATA: 32 bits of function ID
+@@ -64,8 +63,7 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
+   uint32_t *FirstAddress = reinterpret_cast<uint32_t *>(Sled.address());
+   uint32_t *CurAddress = FirstAddress + 1;
+   if (Enable) {
+-    *CurAddress = uint32_t(PatchOpcodes::PO_LdrW0_12);
+-    CurAddress++;
++    *CurAddress++ = 0x18000071; // ldr w17, #12
+     *CurAddress = uint32_t(PatchOpcodes::PO_LdrX16_12);
+     CurAddress++;
+     *CurAddress = uint32_t(PatchOpcodes::PO_BlrX16);
+@@ -143,7 +141,3 @@ bool patchTypedEvent(const bool Enable, const uint32_t FuncId,
+ bool probeRequiredCPUFeatures() XRAY_NEVER_INSTRUMENT { return true; }
+ 
+ } // namespace __xray
+-
+-extern "C" void __xray_ArgLoggerEntry() XRAY_NEVER_INSTRUMENT {
+-  // FIXME: this will have to be implemented in the trampoline assembly file
+-}
+diff --git a/compiler-rt/lib/xray/xray_trampoline_AArch64.S b/compiler-rt/lib/xray/xray_trampoline_AArch64.S
+index 945d990e89b6..6f10dda3602b 100644
+--- a/compiler-rt/lib/xray/xray_trampoline_AArch64.S
++++ b/compiler-rt/lib/xray/xray_trampoline_AArch64.S
+@@ -45,7 +45,8 @@ ASM_SYMBOL(__xray_FunctionEntry):
+   adrp x2, ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)
+   ldr x2, [x2, #:lo12:ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)]
+   cbz x2, 1f
+-  // Function ID is already in w0 (the first parameter). x1=0 means that we are tracing an entry event.
++  // Set w0 to the function ID (w17). Set x1 to XRayEntryType::ENTRY = 0.
++  mov w0, w17
+   mov x1, #0
+   // Call the handler with 2 parameters.
+   blr x2
+@@ -71,7 +72,8 @@ ASM_SYMBOL(__xray_FunctionExit):
+   adrp x2, ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)
+   ldr x2, [x2, #:lo12:ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)]
+   cbz x2, 1f
+-  // Function ID is already in w0 (the first parameter). x1=1 means that we are tracing an exit event.
++  // Set w0 to the function ID (w17). Set x1 to XRayEntryType::EXIT = 1.
++  mov w0, w17
+   mov x1, #1
+   // Call the handler with 2 parameters.
+   blr x2
+@@ -97,7 +99,8 @@ ASM_SYMBOL(__xray_FunctionTailExit):
+   adrp x2, ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)
+   ldr x2, [x2, #:lo12:ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)]
+   cbz x2, 1f
+-  // Function ID is already in w0 (the first parameter). x1=2 means that we are tracing a tail exit event.
++  // Set w0 to the function ID (w17). Set x1 to XRayEntryType::TAIL = 2.
++  mov w0, w17
+   mov x1, #2
+   // Call the handler with 2 parameters.
+   blr x2
+@@ -106,6 +109,35 @@ ASM_SYMBOL(__xray_FunctionTailExit):
+   ret
+ ASM_SIZE(__xray_FunctionTailExit)
+ 
++.p2align 2
++.global ASM_SYMBOL(__xray_ArgLoggerEntry)
++ASM_HIDDEN(__xray_ArgLoggerEntry)
++ASM_TYPE_FUNCTION(__xray_ArgLoggerEntry)
++ASM_SYMBOL(__xray_ArgLoggerEntry):
++  add x30, x30, #12
++  // Push the registers which may be modified by the handler function.
++  SAVE_REGISTERS
++
++  adrp x8, ASM_SYMBOL(_ZN6__xray13XRayArgLoggerE)
++  ldr x8, [x8, #:lo12:ASM_SYMBOL(_ZN6__xray13XRayArgLoggerE)]
++  cbnz x8, 2f
++
++  // Load the handler function pointer.
++  adrp x8, ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)
++  ldr x8, [x8, #:lo12:ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)]
++  cbz x8, 1f
++
++2:
++  mov x2, x0
++  mov x1, #3  // XRayEntryType::LOG_ARGS_ENTRY
++  mov w0, w17
++  blr x8
++
++1:
++  RESTORE_REGISTERS
++  ret
++ASM_SIZE(__xray_ArgLoggerEntry)
++
+ .global ASM_SYMBOL(__xray_CustomEvent)
+ ASM_HIDDEN(__xray_CustomEvent)
+ ASM_TYPE_FUNCTION(__xray_CustomEvent)
+diff --git a/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp b/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp
+index fea9054d2efd..68017e96b1e2 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/arg1-arg0-logging.cpp
+@@ -5,7 +5,7 @@
+ // RUN: %clangxx_xray -std=c++11 %s -o %t
+ // RUN: XRAY_OPTIONS="patch_premain=true verbosity=1 xray_logfile_base=arg0-arg1-logging-" %run %t
+ 
+-// REQUIRES: target={{x86_64-.*}}
++// REQUIRES: target={{(aarch64|x86_64)-.*}}
+ 
+ #include "xray/xray_interface.h"
+ #include <cassert>
+diff --git a/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp b/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp
+index 443f74c48213..bba8ebe7aba3 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/arg1-logger.cpp
+@@ -10,7 +10,7 @@
+ //
+ // RUN: rm -f arg1-logger-*
+ 
+-// REQUIRES: target={{x86_64-.*}}
++// REQUIRES: target={{(aarch64|x86_64)-.*}}
+ 
+ #include "xray/xray_interface.h"
+ 
+diff --git a/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp b/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp
+index e85a1d5474ce..51e191cd40af 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/arg1-logging-implicit-this.cpp
+@@ -3,8 +3,8 @@
+ // RUN: %clangxx_xray -g -std=c++11 %s -o %t
+ // RUN: rm -f log-args-this-*
+ // RUN: XRAY_OPTIONS="patch_premain=true verbosity=1 xray_logfile_base=log-args-this-" %run %t
+-//
+-// REQUIRES: target={{x86_64-.*}}
++
++// REQUIRES: target={{(aarch64|x86_64)-.*}}
+ 
+ #include "xray/xray_interface.h"
+ #include <cassert>
+diff --git a/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp b/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
+index b1f030ddfea9..cc0423f6f46f 100644
+--- a/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
++++ b/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
+@@ -264,7 +264,7 @@ void AArch64AsmPrinter::EmitSled(const MachineInstr &MI, SledKind Kind)
+   // over the full 32 bytes (8 instructions) with the following pattern:
+   //
+   //   STP X0, X30, [SP, #-16]! ; push X0 and the link register to the stack
+-  //   LDR W0, #12 ; W0 := function ID
++  //   LDR W17, #12 ; W17 := function ID
+   //   LDR X16,#12 ; X16 := addr of __xray_FunctionEntry or __xray_FunctionExit
+   //   BLR X16 ; call the tracing trampoline
+   //   ;DATA: 32 bits of function ID
+-- 
+2.39.3
+

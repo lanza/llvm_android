@@ -1,0 +1,179 @@
+From e15e3a8fc15c6ad39397d4e0294ce89e3aafb4ad Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Mon, 25 Jan 2021 00:49:18 -0800
+Subject: [PATCH] [XRay] Support DW_TAG_call_site and delete unneeded
+ PATCHABLE_EVENT_CALL/PATCHABLE_TYPED_EVENT_CALL lowering
+
+---
+ llvm/include/llvm/CodeGen/TargetLowering.h | 10 ------
+ llvm/lib/CodeGen/MachineInstr.cpp          |  2 --
+ llvm/lib/CodeGen/TargetLoweringBase.cpp    | 30 -----------------
+ llvm/lib/Target/X86/X86ISelLowering.cpp    |  4 +--
+ llvm/test/CodeGen/X86/xray-custom-log.ll   | 38 +++++++++++++++++++---
+ 5 files changed, 35 insertions(+), 49 deletions(-)
+
+diff --git a/llvm/include/llvm/CodeGen/TargetLowering.h b/llvm/include/llvm/CodeGen/TargetLowering.h
+index 305107c48750..89f871abd6d7 100644
+--- a/llvm/include/llvm/CodeGen/TargetLowering.h
++++ b/llvm/include/llvm/CodeGen/TargetLowering.h
+@@ -3112,16 +3112,6 @@ protected:
+   MachineBasicBlock *emitPatchPoint(MachineInstr &MI,
+                                     MachineBasicBlock *MBB) const;
+ 
+-  /// Replace/modify the XRay custom event operands with target-dependent
+-  /// details.
+-  MachineBasicBlock *emitXRayCustomEvent(MachineInstr &MI,
+-                                         MachineBasicBlock *MBB) const;
+-
+-  /// Replace/modify the XRay typed event operands with target-dependent
+-  /// details.
+-  MachineBasicBlock *emitXRayTypedEvent(MachineInstr &MI,
+-                                        MachineBasicBlock *MBB) const;
+-
+   bool IsStrictFPEnabled;
+ };
+ 
+diff --git a/llvm/lib/CodeGen/MachineInstr.cpp b/llvm/lib/CodeGen/MachineInstr.cpp
+index c1c7849fbe30..59d98054e3a2 100644
+--- a/llvm/lib/CodeGen/MachineInstr.cpp
++++ b/llvm/lib/CodeGen/MachineInstr.cpp
+@@ -708,8 +708,6 @@ bool MachineInstr::isCandidateForCallSiteEntry(QueryType Type) const {
+   if (!isCall(Type))
+     return false;
+   switch (getOpcode()) {
+-  case TargetOpcode::PATCHABLE_EVENT_CALL:
+-  case TargetOpcode::PATCHABLE_TYPED_EVENT_CALL:
+   case TargetOpcode::PATCHPOINT:
+   case TargetOpcode::STACKMAP:
+   case TargetOpcode::STATEPOINT:
+diff --git a/llvm/lib/CodeGen/TargetLoweringBase.cpp b/llvm/lib/CodeGen/TargetLoweringBase.cpp
+index 6cacb10ab79f..b870dcba2611 100644
+--- a/llvm/lib/CodeGen/TargetLoweringBase.cpp
++++ b/llvm/lib/CodeGen/TargetLoweringBase.cpp
+@@ -1227,36 +1227,6 @@ TargetLoweringBase::emitPatchPoint(MachineInstr &InitialMI,
+   return MBB;
+ }
+ 
+-MachineBasicBlock *
+-TargetLoweringBase::emitXRayCustomEvent(MachineInstr &MI,
+-                                        MachineBasicBlock *MBB) const {
+-  assert(MI.getOpcode() == TargetOpcode::PATCHABLE_EVENT_CALL &&
+-         "Called emitXRayCustomEvent on the wrong MI!");
+-  auto &MF = *MI.getMF();
+-  auto MIB = BuildMI(MF, MI.getDebugLoc(), MI.getDesc());
+-  for (unsigned OpIdx = 0; OpIdx != MI.getNumOperands(); ++OpIdx)
+-    MIB.add(MI.getOperand(OpIdx));
+-
+-  MBB->insert(MachineBasicBlock::iterator(MI), MIB);
+-  MI.eraseFromParent();
+-  return MBB;
+-}
+-
+-MachineBasicBlock *
+-TargetLoweringBase::emitXRayTypedEvent(MachineInstr &MI,
+-                                       MachineBasicBlock *MBB) const {
+-  assert(MI.getOpcode() == TargetOpcode::PATCHABLE_TYPED_EVENT_CALL &&
+-         "Called emitXRayTypedEvent on the wrong MI!");
+-  auto &MF = *MI.getMF();
+-  auto MIB = BuildMI(MF, MI.getDebugLoc(), MI.getDesc());
+-  for (unsigned OpIdx = 0; OpIdx != MI.getNumOperands(); ++OpIdx)
+-    MIB.add(MI.getOperand(OpIdx));
+-
+-  MBB->insert(MachineBasicBlock::iterator(MI), MIB);
+-  MI.eraseFromParent();
+-  return MBB;
+-}
+-
+ /// findRepresentativeClass - Return the largest legal super-reg register class
+ /// of the register class for the specified type and its associated "cost".
+ // This function is in TargetLowering because it uses RegClassForVT which would
+diff --git a/llvm/lib/Target/X86/X86ISelLowering.cpp b/llvm/lib/Target/X86/X86ISelLowering.cpp
+index d87743274c2b..860a41899a31 100644
+--- a/llvm/lib/Target/X86/X86ISelLowering.cpp
++++ b/llvm/lib/Target/X86/X86ISelLowering.cpp
+@@ -33935,10 +33935,8 @@ X86TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+     return emitPatchPoint(MI, BB);
+ 
+   case TargetOpcode::PATCHABLE_EVENT_CALL:
+-    return emitXRayCustomEvent(MI, BB);
+-
+   case TargetOpcode::PATCHABLE_TYPED_EVENT_CALL:
+-    return emitXRayTypedEvent(MI, BB);
++    return BB;
+ 
+   case X86::LCMPXCHG8B: {
+     const X86RegisterInfo *TRI = Subtarget.getRegisterInfo();
+diff --git a/llvm/test/CodeGen/X86/xray-custom-log.ll b/llvm/test/CodeGen/X86/xray-custom-log.ll
+index ee293112249b..f0d882ddbac6 100644
+--- a/llvm/test/CodeGen/X86/xray-custom-log.ll
++++ b/llvm/test/CodeGen/X86/xray-custom-log.ll
+@@ -1,12 +1,15 @@
+ ; RUN: llc -verify-machineinstrs -mtriple=x86_64 < %s | FileCheck %s
+ ; RUN: llc -verify-machineinstrs -mtriple=x86_64 -relocation-model=pic < %s | FileCheck %s --check-prefix=PIC
+ 
+-define i32 @customevent() nounwind "function-instrument"="xray-always" {
++; RUN: llc -mtriple=x86_64 -filetype=obj %s -o %t
++; RUN: llvm-dwarfdump %t | FileCheck %s --check-prefix=DBG
++
++define i32 @customevent() nounwind "function-instrument"="xray-always" !dbg !1 {
+     %eventptr = alloca i8
+     %eventsize = alloca i32
+     store i32 3, i32* %eventsize
+     %val = load i32, i32* %eventsize
+-    call void @llvm.xray.customevent(i8* %eventptr, i32 %val)
++    call void @llvm.xray.customevent(i8* %eventptr, i32 %val), !dbg !8
+     ; CHECK-LABEL: Lxray_event_sled_0:
+     ; CHECK:       .byte 0xeb, 0x0f
+     ; CHECK-NEXT:  pushq %rdi
+@@ -32,7 +35,7 @@ define i32 @customevent() nounwind "function-instrument"="xray-always" {
+ ; CHECK-LABEL: Lxray_sleds_start0:
+ ; CHECK:       .quad {{.*}}xray_event_sled_0
+ 
+-define i32 @typedevent() nounwind "function-instrument"="xray-always" {
++define i32 @typedevent() nounwind "function-instrument"="xray-always" !dbg !2 {
+     %eventptr = alloca i8
+     %eventsize = alloca i32
+     %eventtype = alloca i16
+@@ -40,7 +43,7 @@ define i32 @typedevent() nounwind "function-instrument"="xray-always" {
+     %type = load i16, i16* %eventtype
+     store i32 3, i32* %eventsize
+     %val = load i32, i32* %eventsize
+-    call void @llvm.xray.typedevent(i16 %type, i8* %eventptr, i32 %val)
++    call void @llvm.xray.typedevent(i16 %type, i8* %eventptr, i32 %val), !dbg !9
+     ; CHECK-LABEL: Lxray_typed_event_sled_0:
+     ; CHECK:       .byte 0xeb, 0x14
+     ; CHECK-NEXT:  pushq %rdi
+@@ -74,3 +77,30 @@ define i32 @typedevent() nounwind "function-instrument"="xray-always" {
+ 
+ declare void @llvm.xray.customevent(i8*, i32)
+ declare void @llvm.xray.typedevent(i16, i8*, i32)
++
++;; Construct call site entries for PATCHABLE_EVENT_CALL.
++; DBG:     DW_TAG_subprogram
++; DBG:       DW_TAG_call_site
++; DBG-NEXT:    DW_AT_call_target (DW_OP_reg{{.*}})
++; DBG-NEXT:    DW_AT_call_return_pc
++
++; DBG:     DW_TAG_subprogram
++; DBG:       DW_TAG_call_site
++; DBG-NEXT:    DW_AT_call_target (DW_OP_reg{{.*}})
++; DBG-NEXT:    DW_AT_call_return_pc
++
++!llvm.dbg.cu = !{!7}
++!llvm.module.flags = !{!10, !11}
++
++!1 = distinct !DISubprogram(name: "customevent", scope: !3, file: !3, line: 1, type: !4, scopeLine: 1, flags: DIFlagPrototyped | DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !7)
++!2 = distinct !DISubprogram(name: "typedevent", scope: !3, file: !3, line: 3, type: !4, scopeLine: 3, flags: DIFlagPrototyped | DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !7)
++!3 = !DIFile(filename: "a.c", directory: "/tmp")
++!4 = !DISubroutineType(types: !5)
++!5 = !{!6}
++!6 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
++!7 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus_14, file: !3, producer: "clang version 12.0.0", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)
++!8 = !DILocation(line: 2, column: 3, scope: !1)
++!9 = !DILocation(line: 4, column: 3, scope: !2)
++
++!10 = !{i32 7, !"Dwarf Version", i32 5}
++!11 = !{i32 2, !"Debug Info Version", i32 3}
+-- 
+2.39.3
+

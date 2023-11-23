@@ -1,0 +1,258 @@
+From 7e19a012dc8531543eee4510c500a9f7a31effc4 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Sun, 15 Aug 2021 21:19:04 -0700
+Subject: [PATCH] [test] Change llvm-xray options to use the preferred
+ double-dash forms and change -f= to -f
+
+Change-Id: I92b6f0d73b6beed97759c24f238f83d8919674e3
+---
+ ...ursive-calls-only-tail-call-deduction.yaml |  4 ++--
+ .../X86/account-recursive-calls-only.yaml     |  4 ++--
+ .../X86/convert-basic-arg1-to-yaml.txt        |  2 +-
+ ...onvert-basic-log-arg1-version3-to-yaml.txt |  2 +-
+ .../convert-basic-log-version3-to-yaml.txt    |  2 +-
+ .../X86/convert-fdr-arg1-to-yaml.txt          |  2 +-
+ .../convert-fdr-log-arg1-version3-to-yaml.txt |  2 +-
+ .../X86/convert-fdr-log-version3-to-yaml.txt  |  2 +-
+ .../X86/convert-fdr-to-traceevent.txt         | 12 ++++++++++
+ .../llvm-xray/X86/convert-fdr-to-yaml.txt     |  2 +-
+ .../llvm-xray/X86/convert-roundtrip.yaml      |  2 +-
+ .../tools/llvm-xray/X86/convert-to-yaml.txt   |  2 +-
+ .../X86/convert-traceevent-special-events.txt | 24 +++++++++++++++++++
+ .../llvm-xray/X86/convert-with-debug-syms.txt |  2 +-
+ .../X86/convert-with-standalone-instrmap.txt  |  2 +-
+ .../X86/convert-with-yaml-instrmap.txt        |  2 +-
+ .../llvm-xray/X86/fdr-dump-arg1-version-3.txt |  2 +-
+ .../tools/llvm-xray/X86/fdr-dump-arg1.txt     |  2 +-
+ .../llvm-xray/X86/stack-multithread.yaml      |  4 ++--
+ 19 files changed, 56 insertions(+), 20 deletions(-)
+ create mode 100644 llvm/test/tools/llvm-xray/X86/convert-fdr-to-traceevent.txt
+ create mode 100644 llvm/test/tools/llvm-xray/X86/convert-traceevent-special-events.txt
+
+diff --git a/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only-tail-call-deduction.yaml b/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only-tail-call-deduction.yaml
+index 4f5d01b2cf9b..2b08cc0f7e98 100644
+--- a/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only-tail-call-deduction.yaml
++++ b/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only-tail-call-deduction.yaml
+@@ -1,5 +1,5 @@
+-# RUN: llvm-xray account -d %s -o - -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=ALL %s
+-# RUN: llvm-xray account -d -recursive-calls-only %s -o - -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=RECURSIVE %s
++# RUN: llvm-xray account -d %s -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=ALL %s
++# RUN: llvm-xray account -d --recursive-calls-only %s -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=RECURSIVE %s
+ 
+ ---
+ header:
+diff --git a/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only.yaml b/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only.yaml
+index d7b36200d10d..d3b2d11d52a3 100644
+--- a/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only.yaml
++++ b/llvm/test/tools/llvm-xray/X86/account-recursive-calls-only.yaml
+@@ -1,5 +1,5 @@
+-# RUN: llvm-xray account %s -o - -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=ALL %s
+-# RUN: llvm-xray account -recursive-calls-only %s -o - -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=RECURSIVE %s
++# RUN: llvm-xray account %s -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=ALL %s
++# RUN: llvm-xray account --recursive-calls-only %s -m %S/Inputs/simple-instrmap.yaml | FileCheck --check-prefixes=RECURSIVE %s
+ 
+ ---
+ header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-basic-arg1-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-basic-arg1-to-yaml.txt
+index 52ec12550a3d..1ac24e18949e 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-basic-arg1-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-basic-arg1-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/naive-with-arg1-entries.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/naive-with-arg1-entries.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-basic-log-arg1-version3-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-basic-log-arg1-version3-to-yaml.txt
+index 84c757c2b263..cdddbbc45c36 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-basic-log-arg1-version3-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-basic-log-arg1-version3-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/basic-log-arg1-version-3.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/basic-log-arg1-version-3.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-basic-log-version3-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-basic-log-version3-to-yaml.txt
+index d2af2fc09c2e..a545932200a4 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-basic-log-version3-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-basic-log-version3-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/basic-log-version-3.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/basic-log-version-3.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-fdr-arg1-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-fdr-arg1-to-yaml.txt
+index 592796434bd8..6f4716b01ec3 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-fdr-arg1-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-fdr-arg1-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/fdr-log-arg1.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/fdr-log-arg1.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-fdr-log-arg1-version3-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-fdr-log-arg1-version3-to-yaml.txt
+index afeac68fa3da..594bf01945c7 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-fdr-log-arg1-version3-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-fdr-log-arg1-version3-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/fdr-log-arg1-version-3.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/fdr-log-arg1-version-3.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-fdr-log-version3-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-fdr-log-version3-to-yaml.txt
+index fc70015c41e8..53edc3a3c16f 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-fdr-log-version3-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-fdr-log-version3-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/fdr-log-version-3.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/fdr-log-version-3.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-fdr-to-traceevent.txt b/llvm/test/tools/llvm-xray/X86/convert-fdr-to-traceevent.txt
+new file mode 100644
+index 000000000000..99b4791ca5f4
+--- /dev/null
++++ b/llvm/test/tools/llvm-xray/X86/convert-fdr-to-traceevent.txt
+@@ -0,0 +1,12 @@
++; RUN: llvm-xray convert %S/Inputs/fdr-log-version-1.xray -f trace_event -o - \
++; RUN:   | %python -c 'import json, sys; json.dump(json.loads(sys.stdin.read()), sys.stdout, sort_keys=True, indent=2)' \
++; RUN:   | FileCheck %s
++
++; CHECK: "traceEvents": [
++; Check fields for an event are present
++; CHECK: "name":
++; CHECK-NEXT: "ph":
++; CHECK-NEXT: "pid":
++; CHECK-NEXT: "sf":
++; CHECK-NEXT: "tid":
++; CHECK-NEXT: "ts":
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-fdr-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-fdr-to-yaml.txt
+index 99bc7e11b97b..cfe0126d9e25 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-fdr-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-fdr-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/fdr-log-version-1.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/fdr-log-version-1.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-roundtrip.yaml b/llvm/test/tools/llvm-xray/X86/convert-roundtrip.yaml
+index bbebd67e5761..44702ace87fc 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-roundtrip.yaml
++++ b/llvm/test/tools/llvm-xray/X86/convert-roundtrip.yaml
+@@ -1,4 +1,4 @@
+-#RUN: llvm-xray convert %s -f=raw -o %t && llvm-xray convert %t -f=yaml -o - | FileCheck %s
++#RUN: llvm-xray convert %s -f raw -o %t && llvm-xray convert %t -f yaml -o - | FileCheck %s
+ ---
+ header:
+   version: 1
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-to-yaml.txt b/llvm/test/tools/llvm-xray/X86/convert-to-yaml.txt
+index f807fae3a64c..93c22826294d 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-to-yaml.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-to-yaml.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert %S/Inputs/naive-log-simple.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert %S/Inputs/naive-log-simple.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-traceevent-special-events.txt b/llvm/test/tools/llvm-xray/X86/convert-traceevent-special-events.txt
+new file mode 100644
+index 000000000000..eb8fee723684
+--- /dev/null
++++ b/llvm/test/tools/llvm-xray/X86/convert-traceevent-special-events.txt
+@@ -0,0 +1,24 @@
++# RUN: llvm-xray convert %s -f trace_event -o - \
++# RUN:   | %python -c 'import json, sys; json.dump(json.loads(sys.stdin.read()), sys.stdout, sort_keys=True, indent=2)' \
++# RUN:   | FileCheck %s
++---
++header:
++  version: 1
++  type: 0
++  constant-tsc: true
++  nonstop-tsc: true
++  cycle-frequency: 2601000000
++records:
++  - { type: 0, func-id: 1, cpu: 1, thread: 111, kind: function-enter, tsc: 10001 }
++  - { type: 0, func-id: 1, function: 'x', cpu: 1, thread: 111, process: 111, kind: custom-event, tsc: 2000, data: "\x03\0\0\0" }
++  - { type: 0, func-id: 1, cpu: 1, thread: 111, kind: function-exit, tsc: 10100 }
++...
++
++# CHECK: "traceEvents": [
++# Check fields for an event are present
++# CHECK: "name":
++# CHECK-NEXT: "ph":
++# CHECK-NEXT: "pid":
++# CHECK-NEXT: "sf":
++# CHECK-NEXT: "tid":
++# CHECK-NEXT: "ts":
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt b/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
+index dbb98e3d3cf0..dd601486b2fb 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert -m %S/Inputs/elf64-sample-o2.bin -y %S/Inputs/naive-log-simple.xray -f=yaml -o - 2>&1 | FileCheck %s
++; RUN: llvm-xray convert -m %S/Inputs/elf64-sample-o2.bin -y %S/Inputs/naive-log-simple.xray -f yaml -o - 2>&1 | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-with-standalone-instrmap.txt b/llvm/test/tools/llvm-xray/X86/convert-with-standalone-instrmap.txt
+index 9a1218256565..5c8e8e4cb5cc 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-with-standalone-instrmap.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-with-standalone-instrmap.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert -m %S/Inputs/elf64-objcopied-instrmap.bin -y %S/Inputs/naive-log-simple.xray -f=yaml -o - 2>&1 | FileCheck %s
++; RUN: llvm-xray convert -m %S/Inputs/elf64-objcopied-instrmap.bin -y %S/Inputs/naive-log-simple.xray -f yaml -o - 2>&1 | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-with-yaml-instrmap.txt b/llvm/test/tools/llvm-xray/X86/convert-with-yaml-instrmap.txt
+index 1efcb3572bad..d705ee25d226 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-with-yaml-instrmap.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-with-yaml-instrmap.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray convert -m %S/Inputs/simple-xray-instrmap.yaml %S/Inputs/naive-log-simple.xray -f=yaml -o - | FileCheck %s
++; RUN: llvm-xray convert -m %S/Inputs/simple-xray-instrmap.yaml %S/Inputs/naive-log-simple.xray -f yaml -o - | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1-version-3.txt b/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1-version-3.txt
+index ccb8a1b0538b..7288c320c1b4 100644
+--- a/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1-version-3.txt
++++ b/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1-version-3.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray fdr-dump -verify %S/Inputs/fdr-log-arg1-version-3.xray \
++; RUN: llvm-xray fdr-dump --verify %S/Inputs/fdr-log-arg1-version-3.xray \
+ ; RUN:     | FileCheck %s
+ 
+ ; CHECK:      [New Block]
+diff --git a/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1.txt b/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1.txt
+index 8fb381a170c3..f49bd3f7036c 100644
+--- a/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1.txt
++++ b/llvm/test/tools/llvm-xray/X86/fdr-dump-arg1.txt
+@@ -1,4 +1,4 @@
+-; RUN: llvm-xray fdr-dump -verify %S/Inputs/fdr-log-arg1.xray | FileCheck %s
++; RUN: llvm-xray fdr-dump --verify %S/Inputs/fdr-log-arg1.xray | FileCheck %s
+ 
+ ; CHECK:      [New Block]
+ ; CHECK-NEXT: Preamble:
+diff --git a/llvm/test/tools/llvm-xray/X86/stack-multithread.yaml b/llvm/test/tools/llvm-xray/X86/stack-multithread.yaml
+index 95be7f770817..ce8ffce62c24 100644
+--- a/llvm/test/tools/llvm-xray/X86/stack-multithread.yaml
++++ b/llvm/test/tools/llvm-xray/X86/stack-multithread.yaml
+@@ -1,5 +1,5 @@
+-#RUN: llvm-xray stack -per-thread-stacks %s | FileCheck %s --check-prefix PER-THREAD
+-#RUN: llvm-xray stack -aggregate-threads %s | FileCheck %s --check-prefix AGGREGATE
++#RUN: llvm-xray stack --per-thread-stacks %s | FileCheck %s --check-prefix PER-THREAD
++#RUN: llvm-xray stack --aggregate-threads %s | FileCheck %s --check-prefix AGGREGATE
+ 
+ ---
+ header:
+-- 
+2.39.3
+

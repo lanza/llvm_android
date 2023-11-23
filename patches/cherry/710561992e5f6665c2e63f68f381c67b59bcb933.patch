@@ -1,0 +1,46 @@
+From 710561992e5f6665c2e63f68f381c67b59bcb933 Mon Sep 17 00:00:00 2001
+From: Oleksii Lozovskyi <me@ilammy.net>
+Date: Tue, 20 Jun 2023 20:47:32 -0700
+Subject: [PATCH] [Driver] Allow XRay on Apple Silicon
+
+Codegen can handle XRay for AArch64, tell the driver to allow it.
+
+Differential Revision: https://reviews.llvm.org/D145849
+---
+ clang/lib/Driver/XRayArgs.cpp            | 7 ++++++-
+ clang/test/Driver/XRay/xray-instrument.c | 1 +
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/clang/lib/Driver/XRayArgs.cpp b/clang/lib/Driver/XRayArgs.cpp
+index 427c4ced3cd4..1f397d08237d 100644
+--- a/clang/lib/Driver/XRayArgs.cpp
++++ b/clang/lib/Driver/XRayArgs.cpp
+@@ -32,9 +32,14 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+     return;
+   XRayInstrument = Args.getLastArg(options::OPT_fxray_instrument);
+   if (Triple.isMacOSX()) {
+-    if (Triple.getArch() != llvm::Triple::x86_64) {
++    switch (Triple.getArch()) {
++    case llvm::Triple::aarch64:
++    case llvm::Triple::x86_64:
++      break;
++    default:
+       D.Diag(diag::err_drv_unsupported_opt_for_target)
+           << XRayInstrument->getSpelling() << Triple.str();
++      break;
+     }
+   } else if (Triple.isOSBinFormatELF()) {
+     switch (Triple.getArch()) {
+diff --git a/clang/test/Driver/XRay/xray-instrument.c b/clang/test/Driver/XRay/xray-instrument.c
+index 430418446366..4c6b9b12fe9a 100644
+--- a/clang/test/Driver/XRay/xray-instrument.c
++++ b/clang/test/Driver/XRay/xray-instrument.c
+@@ -1,4 +1,5 @@
+ // RUN: %clang -### --target=aarch64-pc-freebsd -fxray-instrument -c %s -o /dev/null 2>&1 | FileCheck %s
++// RUN: %clang -### --target=arm64-apple-macos -fxray-instrument -c %s -o /dev/null 2>&1 | FileCheck %s
+ // RUN: %clang -### --target=x86_64-apple-darwin -fxray-instrument -c %s -o /dev/null 2>&1 | FileCheck %s
+ // RUN: %clang -### --target=x86_64-pc-windows -fxray-instrument -c %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ERR
+ 
+-- 
+2.39.3
+

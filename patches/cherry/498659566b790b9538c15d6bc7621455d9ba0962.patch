@@ -1,0 +1,924 @@
+From 498659566b790b9538c15d6bc7621455d9ba0962 Mon Sep 17 00:00:00 2001
+From: Brian Cain <bcain@quicinc.com>
+Date: Wed, 8 Dec 2021 17:57:20 -0800
+Subject: [PATCH] [xray] add support for hexagon
+
+Adds x-ray support for hexagon to llvm codegen, clang driver,
+compiler-rt libs.
+
+Differential Revision: https://reviews.llvm.org/D113638
+
+Change-Id: I91a66f6e32d4d7f029d3b3545e0c089098a3cc21
+---
+ clang/lib/Driver/ToolChains/Hexagon.cpp       |  80 +++++++--
+ clang/lib/Driver/XRayArgs.cpp                 |   1 +
+ .../cmake/Modules/AllSupportedArchDefs.cmake  |  83 +++++++++
+ compiler-rt/lib/xray/CMakeLists.txt           |   6 +
+ compiler-rt/lib/xray/xray_hexagon.cpp         | 168 ++++++++++++++++++
+ compiler-rt/lib/xray/xray_interface.cpp       |   2 +
+ .../lib/xray/xray_trampoline_hexagon.S        |  99 +++++++++++
+ compiler-rt/lib/xray/xray_tsc.h               |   3 +-
+ llvm/lib/CodeGen/XRayInstrumentation.cpp      |   1 +
+ llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp |  61 +++++++
+ llvm/lib/Target/Hexagon/HexagonAsmPrinter.h   |  16 +-
+ llvm/lib/Target/Hexagon/HexagonInstrInfo.cpp  |  10 ++
+ llvm/lib/Target/Hexagon/HexagonInstrInfo.h    |   2 +
+ .../lib/Target/Hexagon/HexagonMCInstLower.cpp |  13 ++
+ llvm/lib/Target/Hexagon/HexagonSubtarget.h    |   2 +
+ .../Target/Hexagon/HexagonVLIWPacketizer.cpp  |   5 +
+ llvm/test/CodeGen/Hexagon/xray-pred-ret.ll    |  27 +++
+ llvm/test/CodeGen/Hexagon/xray.ll             |  29 +++
+ 18 files changed, 587 insertions(+), 21 deletions(-)
+ create mode 100644 compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
+ create mode 100644 compiler-rt/lib/xray/xray_hexagon.cpp
+ create mode 100644 compiler-rt/lib/xray/xray_trampoline_hexagon.S
+ create mode 100644 llvm/test/CodeGen/Hexagon/xray-pred-ret.ll
+ create mode 100644 llvm/test/CodeGen/Hexagon/xray.ll
+
+diff --git a/clang/lib/Driver/ToolChains/Hexagon.cpp b/clang/lib/Driver/ToolChains/Hexagon.cpp
+index fb54f73bcd4c..2ce7904ecc40 100644
+--- a/clang/lib/Driver/ToolChains/Hexagon.cpp
++++ b/clang/lib/Driver/ToolChains/Hexagon.cpp
+@@ -8,10 +8,10 @@
+ 
+ #include "Hexagon.h"
+ #include "CommonArgs.h"
+-#include "InputInfo.h"
+ #include "clang/Driver/Compilation.h"
+ #include "clang/Driver/Driver.h"
+ #include "clang/Driver/DriverDiagnostic.h"
++#include "clang/Driver/InputInfo.h"
+ #include "clang/Driver/Options.h"
+ #include "llvm/ADT/StringExtras.h"
+ #include "llvm/Option/ArgList.h"
+@@ -38,7 +38,7 @@ static void handleHVXWarnings(const Driver &D, const ArgList &Args) {
+   // Handle the unsupported values passed to mhvx-length.
+   if (Arg *A = Args.getLastArg(options::OPT_mhexagon_hvx_length_EQ)) {
+     StringRef Val = A->getValue();
+-    if (!Val.equals_lower("64b") && !Val.equals_lower("128b"))
++    if (!Val.equals_insensitive("64b") && !Val.equals_insensitive("128b"))
+       D.Diag(diag::err_drv_unsupported_option_argument)
+           << A->getOption().getName() << Val;
+   }
+@@ -146,6 +146,8 @@ void hexagon::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
+       "-mcpu=hexagon" +
+       toolchains::HexagonToolChain::GetTargetCPUVersion(Args)));
+ 
++  addSanitizerRuntimes(HTC, Args, CmdArgs);
++
+   if (Output.isFilename()) {
+     CmdArgs.push_back("-o");
+     CmdArgs.push_back(Output.getFilename());
+@@ -218,11 +220,14 @@ constructHexagonLinkArgs(Compilation &C, const JobAction &JA,
+   bool IncDefLibs = !Args.hasArg(options::OPT_nodefaultlibs);
+   bool UseG0 = false;
+   const char *Exec = Args.MakeArgString(HTC.GetLinkerPath());
+-  bool UseLLD = (llvm::sys::path::filename(Exec).equals_lower("ld.lld") ||
+-                 llvm::sys::path::stem(Exec).equals_lower("ld.lld"));
++  bool UseLLD = (llvm::sys::path::filename(Exec).equals_insensitive("ld.lld") ||
++                 llvm::sys::path::stem(Exec).equals_insensitive("ld.lld"));
+   bool UseShared = IsShared && !IsStatic;
+   StringRef CpuVer = toolchains::HexagonToolChain::GetTargetCPUVersion(Args);
+ 
++  bool NeedsSanitizerDeps = addSanitizerRuntimes(HTC, Args, CmdArgs);
++  bool NeedsXRayDeps = addXRayRuntime(HTC, Args, CmdArgs);
++
+   //----------------------------------------------------------------------------
+   // Silence warnings for various options
+   //----------------------------------------------------------------------------
+@@ -288,6 +293,14 @@ constructHexagonLinkArgs(Compilation &C, const JobAction &JA,
+     AddLinkerInputs(HTC, Inputs, Args, CmdArgs, JA);
+ 
+     if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
++      if (NeedsSanitizerDeps) {
++        linkSanitizerRuntimeDeps(HTC, CmdArgs);
++
++        CmdArgs.push_back("-lunwind");
++      }
++      if (NeedsXRayDeps)
++        linkXRayRuntimeDeps(HTC, CmdArgs);
++
+       CmdArgs.push_back("-lclang_rt.builtins-hexagon");
+       CmdArgs.push_back("-lc");
+     }
+@@ -450,6 +463,13 @@ Optional<unsigned> HexagonToolChain::getSmallDataThreshold(
+   return None;
+ }
+ 
++std::string HexagonToolChain::getCompilerRTPath() const {
++  SmallString<128> Dir(getDriver().SysRoot);
++  llvm::sys::path::append(Dir, "usr", "lib");
++  Dir += SelectedMultilib.gccSuffix();
++  return std::string(Dir.str());
++}
++
+ void HexagonToolChain::getHexagonLibraryPaths(const ArgList &Args,
+       ToolChain::path_list &LibPaths) const {
+   const Driver &D = getDriver();
+@@ -470,7 +490,7 @@ void HexagonToolChain::getHexagonLibraryPaths(const ArgList &Args,
+ 
+   std::string TargetDir = getHexagonTargetDir(D.getInstalledDir(),
+                                               D.PrefixDirs);
+-  if (llvm::find(RootDirs, TargetDir) == RootDirs.end())
++  if (!llvm::is_contained(RootDirs, TargetDir))
+     RootDirs.push_back(TargetDir);
+ 
+   bool HasPIC = Args.hasArg(options::OPT_fpic, options::OPT_fPIC);
+@@ -588,21 +608,43 @@ void HexagonToolChain::addClangTargetOptions(const ArgList &DriverArgs,
+ 
+ void HexagonToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
+                                                  ArgStringList &CC1Args) const {
+-  if (DriverArgs.hasArg(options::OPT_nostdinc) ||
+-      DriverArgs.hasArg(options::OPT_nostdlibinc))
++  if (DriverArgs.hasArg(options::OPT_nostdinc))
+     return;
+ 
++  const bool IsELF = !getTriple().isMusl() && !getTriple().isOSLinux();
++  const bool IsLinuxMusl = getTriple().isMusl() && getTriple().isOSLinux();
++
+   const Driver &D = getDriver();
+-  if (!D.SysRoot.empty()) {
++  SmallString<128> ResourceDirInclude(D.ResourceDir);
++  if (!IsELF) {
++    llvm::sys::path::append(ResourceDirInclude, "include");
++    if (!DriverArgs.hasArg(options::OPT_nobuiltininc) &&
++        (!IsLinuxMusl || DriverArgs.hasArg(options::OPT_nostdlibinc)))
++      addSystemInclude(DriverArgs, CC1Args, ResourceDirInclude);
++  }
++  if (DriverArgs.hasArg(options::OPT_nostdlibinc))
++    return;
++
++  const bool HasSysRoot = !D.SysRoot.empty();
++  if (HasSysRoot) {
+     SmallString<128> P(D.SysRoot);
+-    if (getTriple().isMusl())
++    if (IsLinuxMusl)
+       llvm::sys::path::append(P, "usr/include");
+     else
+       llvm::sys::path::append(P, "include");
++
+     addExternCSystemInclude(DriverArgs, CC1Args, P.str());
+-    return;
++    // LOCAL_INCLUDE_DIR
++    addSystemInclude(DriverArgs, CC1Args, P + "/usr/local/include");
++    // TOOL_INCLUDE_DIR
++    AddMultilibIncludeArgs(DriverArgs, CC1Args);
+   }
+ 
++  if (!DriverArgs.hasArg(options::OPT_nobuiltininc) && IsLinuxMusl)
++    addSystemInclude(DriverArgs, CC1Args, ResourceDirInclude);
++
++  if (HasSysRoot)
++    return;
+   std::string TargetDir = getHexagonTargetDir(D.getInstalledDir(),
+                                               D.PrefixDirs);
+   addExternCSystemInclude(DriverArgs, CC1Args, TargetDir + "/hexagon/include");
+@@ -613,15 +655,15 @@ void HexagonToolChain::addLibCxxIncludePaths(
+     llvm::opt::ArgStringList &CC1Args) const {
+   const Driver &D = getDriver();
+   if (!D.SysRoot.empty() && getTriple().isMusl())
+-    addLibStdCXXIncludePaths(D.SysRoot + "/usr/include/c++/v1", "", "", "", "",
+-                             "", DriverArgs, CC1Args);
++    addLibStdCXXIncludePaths(D.SysRoot + "/usr/include/c++/v1", "", "",
++                             DriverArgs, CC1Args);
+   else if (getTriple().isMusl())
+-    addLibStdCXXIncludePaths("/usr/include/c++/v1", "", "", "", "", "",
+-                             DriverArgs, CC1Args);
++    addLibStdCXXIncludePaths("/usr/include/c++/v1", "", "", DriverArgs,
++                             CC1Args);
+   else {
+     std::string TargetDir = getHexagonTargetDir(D.InstalledDir, D.PrefixDirs);
+-    addLibStdCXXIncludePaths(TargetDir, "/hexagon/include/c++/v1", "", "", "",
+-                             "", DriverArgs, CC1Args);
++    addLibStdCXXIncludePaths(TargetDir + "/hexagon/include/c++/v1", "", "",
++                             DriverArgs, CC1Args);
+   }
+ }
+ void HexagonToolChain::addLibStdCxxIncludePaths(
+@@ -629,7 +671,7 @@ void HexagonToolChain::addLibStdCxxIncludePaths(
+     llvm::opt::ArgStringList &CC1Args) const {
+   const Driver &D = getDriver();
+   std::string TargetDir = getHexagonTargetDir(D.InstalledDir, D.PrefixDirs);
+-  addLibStdCXXIncludePaths(TargetDir, "/hexagon/include/c++", "", "", "", "",
++  addLibStdCXXIncludePaths(TargetDir + "/hexagon/include/c++", "", "",
+                            DriverArgs, CC1Args);
+ }
+ 
+@@ -665,11 +707,11 @@ bool HexagonToolChain::isAutoHVXEnabled(const llvm::opt::ArgList &Args) {
+ // Returns the default CPU for Hexagon. This is the default compilation target
+ // if no Hexagon processor is selected at the command-line.
+ //
+-const StringRef HexagonToolChain::GetDefaultCPU() {
++StringRef HexagonToolChain::GetDefaultCPU() {
+   return "hexagonv60";
+ }
+ 
+-const StringRef HexagonToolChain::GetTargetCPUVersion(const ArgList &Args) {
++StringRef HexagonToolChain::GetTargetCPUVersion(const ArgList &Args) {
+   Arg *CpuArg = nullptr;
+   if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
+     CpuArg = A;
+diff --git a/clang/lib/Driver/XRayArgs.cpp b/clang/lib/Driver/XRayArgs.cpp
+index 54514263e25f..cf9b5780c455 100644
+--- a/clang/lib/Driver/XRayArgs.cpp
++++ b/clang/lib/Driver/XRayArgs.cpp
+@@ -40,6 +40,7 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+     case llvm::Triple::x86_64:
+     case llvm::Triple::arm:
+     case llvm::Triple::aarch64:
++    case llvm::Triple::hexagon:
+     case llvm::Triple::ppc64le:
+     case llvm::Triple::mips:
+     case llvm::Triple::mipsel:
+diff --git a/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake b/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
+new file mode 100644
+index 000000000000..3e86cf63c789
+--- /dev/null
++++ b/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
+@@ -0,0 +1,83 @@
++set(ARM64 aarch64)
++set(ARM32 arm armhf)
++set(HEXAGON hexagon)
++set(X86 i386)
++set(X86_64 x86_64)
++set(MIPS32 mips mipsel)
++set(MIPS64 mips64 mips64el)
++set(PPC32 powerpc powerpcspe)
++set(PPC64 powerpc64 powerpc64le)
++set(RISCV32 riscv32)
++set(RISCV64 riscv64)
++set(S390X s390x)
++set(SPARC sparc)
++set(SPARCV9 sparcv9)
++set(WASM32 wasm32)
++set(WASM64 wasm64)
++set(VE ve)
++
++if(APPLE)
++  set(ARM64 arm64)
++  set(ARM32 armv7 armv7s armv7k)
++  set(X86_64 x86_64 x86_64h)
++endif()
++
++set(ALL_SANITIZER_COMMON_SUPPORTED_ARCH ${X86} ${X86_64} ${PPC64} ${RISCV64}
++    ${ARM32} ${ARM64} ${MIPS32} ${MIPS64} ${S390X} ${SPARC} ${SPARCV9}
++    ${HEXAGON})
++set(ALL_ASAN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${RISCV64}
++    ${MIPS32} ${MIPS64} ${PPC64} ${S390X} ${SPARC} ${SPARCV9} ${HEXAGON})
++set(ALL_CRT_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${PPC32}
++    ${PPC64} ${RISCV32} ${RISCV64} ${VE} ${HEXAGON})
++set(ALL_DFSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64})
++
++if(ANDROID)
++  set(OS_NAME "Android")
++else()
++  set(OS_NAME "${CMAKE_SYSTEM_NAME}")
++endif()
++
++if(OS_NAME MATCHES "Linux")
++  set(ALL_FUZZER_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${S390X})
++elseif (OS_NAME MATCHES "Windows")
++  set(ALL_FUZZER_SUPPORTED_ARCH ${X86} ${X86_64})
++elseif(OS_NAME MATCHES "Android")
++  set(ALL_FUZZER_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64})
++else()
++  set(ALL_FUZZER_SUPPORTED_ARCH ${X86_64} ${ARM64})
++endif()
++
++set(ALL_GWP_ASAN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64})
++if(APPLE)
++  set(ALL_LSAN_SUPPORTED_ARCH ${X86} ${X86_64} ${MIPS64} ${ARM64})
++else()
++  set(ALL_LSAN_SUPPORTED_ARCH ${X86} ${X86_64} ${MIPS64} ${ARM64} ${ARM32}
++      ${PPC64} ${S390X} ${RISCV64} ${HEXAGON})
++endif()
++set(ALL_MSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64} ${PPC64} ${S390X})
++set(ALL_HWASAN_SUPPORTED_ARCH ${X86_64} ${ARM64})
++set(ALL_MEMPROF_SUPPORTED_ARCH ${X86_64})
++set(ALL_PROFILE_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${PPC32} ${PPC64}
++    ${MIPS32} ${MIPS64} ${S390X} ${SPARC} ${SPARCV9} ${HEXAGON})
++set(ALL_TSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64} ${PPC64} ${S390X})
++set(ALL_UBSAN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${RISCV64}
++    ${MIPS32} ${MIPS64} ${PPC64} ${S390X} ${SPARC} ${SPARCV9} ${HEXAGON})
++set(ALL_SAFESTACK_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM64} ${MIPS32} ${MIPS64}
++    ${HEXAGON})
++set(ALL_CFI_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${MIPS64}
++    ${HEXAGON})
++set(ALL_SCUDO_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${MIPS32}
++    ${MIPS64} ${PPC64} ${HEXAGON})
++set(ALL_SCUDO_STANDALONE_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64}
++    ${MIPS32} ${MIPS64} ${PPC64} ${HEXAGON})
++if(APPLE)
++set(ALL_XRAY_SUPPORTED_ARCH ${X86_64})
++else()
++set(ALL_XRAY_SUPPORTED_ARCH ${X86_64} ${ARM32} ${ARM64} ${MIPS32} ${MIPS64}
++		powerpc64le ${HEXAGON})
++endif()
++set(ALL_SHADOWCALLSTACK_SUPPORTED_ARCH ${ARM64})
++
++if (UNIX)
++set(ALL_ORC_SUPPORTED_ARCH ${X86_64} ${ARM64} ${ARM32})
++endif()
+diff --git a/compiler-rt/lib/xray/CMakeLists.txt b/compiler-rt/lib/xray/CMakeLists.txt
+index 2187caa1d376..85b2a68db2ad 100644
+--- a/compiler-rt/lib/xray/CMakeLists.txt
++++ b/compiler-rt/lib/xray/CMakeLists.txt
+@@ -73,6 +73,11 @@ set(powerpc64le_SOURCES
+   xray_trampoline_powerpc64_asm.S
+   )
+ 
++set(hexagon_SOURCES
++  xray_hexagon.cpp
++  xray_trampoline_hexagon.S
++  )
++
+ set(XRAY_IMPL_HEADERS
+   xray_allocator.h
+   xray_basic_flags.h
+@@ -111,6 +116,7 @@ set(XRAY_ALL_SOURCE_FILES
+   ${x86_64_SOURCES}
+   ${arm_SOURCES}
+   ${armhf_SOURCES}
++  ${hexagon_SOURCES}
+   ${mips_SOURCES}
+   ${mipsel_SOURCES}
+   ${mips64_SOURCES}
+diff --git a/compiler-rt/lib/xray/xray_hexagon.cpp b/compiler-rt/lib/xray/xray_hexagon.cpp
+new file mode 100644
+index 000000000000..7f127b2b499c
+--- /dev/null
++++ b/compiler-rt/lib/xray/xray_hexagon.cpp
+@@ -0,0 +1,168 @@
++//===-- xray_hexagon.cpp --------------------------------------*- C++ ---*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++//
++// This file is a part of XRay, a dynamic runtime instrumentation system.
++//
++// Implementation of hexagon-specific routines (32-bit).
++//
++//===----------------------------------------------------------------------===//
++#include "sanitizer_common/sanitizer_common.h"
++#include "xray_defs.h"
++#include "xray_interface_internal.h"
++#include <assert.h>
++#include <atomic>
++
++namespace __xray {
++
++// The machine codes for some instructions used in runtime patching.
++enum PatchOpcodes : uint32_t {
++  PO_JUMPI_14 = 0x5800c00a, // jump #0x014 (PC + 0x014)
++  PO_CALLR_R6 = 0x50a6c000, // indirect call: callr r6
++  PO_TFR_IMM = 0x78000000,  // transfer immed
++                            // ICLASS 0x7 - S2-type A-type
++  PO_IMMEXT = 0x00000000, // constant extender
++};
++
++enum PacketWordParseBits : uint32_t {
++  PP_DUPLEX = 0x00 << 14,
++  PP_NOT_END = 0x01 << 14,
++  PP_PACKET_END = 0x03 << 14,
++};
++
++enum RegNum : uint32_t {
++  RN_R6 = 0x6,
++  RN_R7 = 0x7,
++};
++
++inline static uint32_t
++encodeExtendedTransferImmediate(uint32_t Imm, RegNum DestReg,
++                                bool PacketEnd = false) XRAY_NEVER_INSTRUMENT {
++  static const uint32_t REG_MASK = 0x1f;
++  assert((DestReg & (~REG_MASK)) == 0);
++  // The constant-extended register transfer encodes the 6 least
++  // significant bits of the effective constant:
++  Imm = Imm & 0x03f;
++  const PacketWordParseBits ParseBits = PacketEnd ? PP_PACKET_END : PP_NOT_END;
++
++  return PO_TFR_IMM | ParseBits | (Imm << 5) | (DestReg & REG_MASK);
++}
++
++inline static uint32_t
++encodeConstantExtender(uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  // Bits   Name      Description
++  // -----  -------   ------------------------------------------
++  // 31:28  ICLASS    Instruction class = 0000
++  // 27:16  high      High 12 bits of 26-bit constant extension
++  // 15:14  Parse     Parse bits
++  // 13:0   low       Low 14 bits of 26-bit constant extension
++  static const uint32_t IMM_MASK_LOW = 0x03fff;
++  static const uint32_t IMM_MASK_HIGH = 0x00fff << 14;
++
++  // The extender encodes the 26 most significant bits of the effective
++  // constant:
++  Imm = Imm >> 6;
++
++  const uint32_t high = (Imm & IMM_MASK_HIGH) << 16;
++  const uint32_t low = Imm & IMM_MASK_LOW;
++
++  return PO_IMMEXT | high | PP_NOT_END | low;
++}
++
++static void WriteInstFlushCache(void *Addr, uint32_t NewInstruction) {
++  asm volatile("icinva(%[inst_addr])\n\t"
++               "isync\n\t"
++               "memw(%[inst_addr]) = %[new_inst]\n\t"
++               "dccleaninva(%[inst_addr])\n\t"
++               "syncht\n\t"
++               :
++               : [ inst_addr ] "r"(Addr), [ new_inst ] "r"(NewInstruction)
++               : "memory");
++}
++
++inline static bool patchSled(const bool Enable, const uint32_t FuncId,
++                             const XRaySledEntry &Sled,
++                             void (*TracingHook)()) XRAY_NEVER_INSTRUMENT {
++  // When |Enable| == true,
++  // We replace the following compile-time stub (sled):
++  //
++  // .L_xray_sled_N:
++  // <xray_sled_base>:
++  // {  jump .Ltmp0 }
++  // {  nop
++  //    nop
++  //    nop
++  //    nop }
++  // .Ltmp0:
++
++  // With the following runtime patch:
++  //
++  // xray_sled_n (32-bit):
++  //
++  // <xray_sled_n>:
++  // {  immext(#...) // upper 26-bits of func id
++  //    r7 = ##...   // lower  6-bits of func id
++  //    immext(#...) // upper 26-bits of trampoline
++  //    r6 = ##... }  // lower 6 bits of trampoline
++  // {  callr r6 }
++  //
++  // When |Enable|==false, we set back the first instruction in the sled to be
++  // {  jump .Ltmp0 }
++
++  uint32_t *FirstAddress = reinterpret_cast<uint32_t *>(Sled.address());
++  if (Enable) {
++    uint32_t *CurAddress = FirstAddress + 1;
++    *CurAddress = encodeExtendedTransferImmediate(FuncId, RN_R7);
++    CurAddress++;
++    *CurAddress = encodeConstantExtender(reinterpret_cast<uint32_t>(TracingHook));
++    CurAddress++;
++    *CurAddress =
++        encodeExtendedTransferImmediate(reinterpret_cast<uint32_t>(TracingHook), RN_R6, true);
++    CurAddress++;
++
++    *CurAddress = uint32_t(PO_CALLR_R6);
++
++    WriteInstFlushCache(FirstAddress, uint32_t(encodeConstantExtender(FuncId)));
++  } else {
++    WriteInstFlushCache(FirstAddress, uint32_t(PatchOpcodes::PO_JUMPI_14));
++  }
++  return true;
++}
++
++bool patchFunctionEntry(const bool Enable, const uint32_t FuncId,
++                        const XRaySledEntry &Sled,
++                        void (*Trampoline)()) XRAY_NEVER_INSTRUMENT {
++  return patchSled(Enable, FuncId, Sled, Trampoline);
++}
++
++bool patchFunctionExit(const bool Enable, const uint32_t FuncId,
++                       const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
++}
++
++bool patchFunctionTailExit(const bool Enable, const uint32_t FuncId,
++                           const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
++}
++
++bool patchCustomEvent(const bool Enable, const uint32_t FuncId,
++                      const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement in hexagon?
++  return false;
++}
++
++bool patchTypedEvent(const bool Enable, const uint32_t FuncId,
++                     const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement in hexagon?
++  return false;
++}
++
++} // namespace __xray
++
++extern "C" void __xray_ArgLoggerEntry() XRAY_NEVER_INSTRUMENT {
++  // FIXME: this will have to be implemented in the trampoline assembly file
++}
+diff --git a/compiler-rt/lib/xray/xray_interface.cpp b/compiler-rt/lib/xray/xray_interface.cpp
+index 866b1ac90557..0bbdd805730f 100644
+--- a/compiler-rt/lib/xray/xray_interface.cpp
++++ b/compiler-rt/lib/xray/xray_interface.cpp
+@@ -52,6 +52,8 @@ static const int16_t cSledLength = 48;
+ static const int16_t cSledLength = 64;
+ #elif defined(__powerpc64__)
+ static const int16_t cSledLength = 8;
++#elif defined(__hexagon__)
++static const int16_t cSledLength = 20;
+ #else
+ #error "Unsupported CPU Architecture"
+ #endif /* CPU architecture */
+diff --git a/compiler-rt/lib/xray/xray_trampoline_hexagon.S b/compiler-rt/lib/xray/xray_trampoline_hexagon.S
+new file mode 100644
+index 000000000000..c87ec4bed1f9
+--- /dev/null
++++ b/compiler-rt/lib/xray/xray_trampoline_hexagon.S
+@@ -0,0 +1,99 @@
++//===-- xray_trampoline_hexagon.s -------------------------------*- ASM -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++//
++// This file is a part of XRay, a dynamic runtime instrumentation system.
++//
++// This implements the hexagon-specific assembler for the trampolines.
++//
++//===----------------------------------------------------------------------===//
++
++#include "../builtins/assembly.h"
++#include "../sanitizer_common/sanitizer_asm.h"
++
++.macro SAVE_REGISTERS
++memw(sp+#0)=r0
++memw(sp+#4)=r1
++memw(sp+#8)=r2
++memw(sp+#12)=r3
++memw(sp+#16)=r4
++.endm
++.macro RESTORE_REGISTERS
++r0=memw(sp+#0)
++r1=memw(sp+#4)
++r2=memw(sp+#8)
++r3=memw(sp+#12)
++r4=memw(sp+#16)
++.endm
++
++.macro CALL_PATCHED_FUNC entry_type
++	// if (xray::XRayPatchedFunctionE != NULL)
++	//     xray::XRayPatchedFunctionE(FuncType);
++
++	r8 = #ASM_SYMBOL(_ZN6__xray19XRayPatchedFunctionE)
++
++	// The patched sled puts the function type
++	// into r6.  Move it into r0 to pass it to
++	// the patched function.
++	{ r0 = r6
++          r1 = \entry_type
++          p0 = !cmp.eq(r8, #0)
++	  if (p0) callr r8 }
++.endm
++
++	.text
++	.globl ASM_SYMBOL(__xray_FunctionEntry)
++	ASM_HIDDEN(__xray_FunctionEntry)
++	ASM_TYPE_FUNCTION(__xray_FunctionEntry)
++# LLVM-MCA-BEGIN __xray_FunctionEntry
++ASM_SYMBOL(__xray_FunctionEntry):
++	CFI_STARTPROC
++	SAVE_REGISTERS
++
++	CALL_PATCHED_FUNC #0  // XRayEntryType::ENTRY
++.Ltmp0:
++	RESTORE_REGISTERS
++	// return
++# LLVM-MCA-END
++	ASM_SIZE(__xray_FunctionEntry)
++	CFI_ENDPROC
++
++
++	.globl ASM_SYMBOL(__xray_FunctionExit)
++	ASM_HIDDEN(__xray_FunctionExit)
++	ASM_TYPE_FUNCTION(__xray_FunctionExit)
++# LLVM-MCA-BEGIN __xray_FunctionExit
++ASM_SYMBOL(__xray_FunctionExit):
++	CFI_STARTPROC
++	SAVE_REGISTERS
++
++	CALL_PATCHED_FUNC #1  // XRayEntryType::EXIT
++.Ltmp1:
++	RESTORE_REGISTERS
++	// return
++	jumpr r31
++# LLVM-MCA-END
++	ASM_SIZE(__xray_FunctionExit)
++	CFI_ENDPROC
++
++
++	.globl ASM_SYMBOL(__xray_FunctionTailExit)
++	ASM_HIDDEN(__xray_FunctionTailExit)
++	ASM_TYPE_FUNCTION(__xray_FunctionTailExit)
++# LLVM-MCA-BEGIN __xray_FunctionTailExit
++ASM_SYMBOL(__xray_FunctionTailExit):
++	CFI_STARTPROC
++	SAVE_REGISTERS
++
++	CALL_PATCHED_FUNC #2  // XRayEntryType::TAIL
++.Ltmp2:
++	RESTORE_REGISTERS
++	// return
++	jumpr r31
++# LLVM-MCA-END
++	ASM_SIZE(__xray_FunctionTailExit)
++	CFI_ENDPROC
+diff --git a/compiler-rt/lib/xray/xray_tsc.h b/compiler-rt/lib/xray/xray_tsc.h
+index bd7e1911abb3..58347dca5f7a 100644
+--- a/compiler-rt/lib/xray/xray_tsc.h
++++ b/compiler-rt/lib/xray/xray_tsc.h
+@@ -42,7 +42,8 @@ inline uint64_t getTSCFrequency() XRAY_NEVER_INSTRUMENT {
+ #include "xray_x86_64.inc"
+ #elif defined(__powerpc64__)
+ #include "xray_powerpc64.inc"
+-#elif defined(__arm__) || defined(__aarch64__) || defined(__mips__)
++#elif defined(__arm__) || defined(__aarch64__) || defined(__mips__) ||         \
++    defined(__hexagon__)
+ // Emulated TSC.
+ // There is no instruction like RDTSCP in user mode on ARM. ARM's CP15 does
+ //   not have a constant frequency like TSC on x86(_64), it may go faster
+diff --git a/llvm/lib/CodeGen/XRayInstrumentation.cpp b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+index 142f197bb109..d77e849f16a9 100644
+--- a/llvm/lib/CodeGen/XRayInstrumentation.cpp
++++ b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+@@ -238,6 +238,7 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
+     case Triple::ArchType::arm:
+     case Triple::ArchType::thumb:
+     case Triple::ArchType::aarch64:
++    case Triple::ArchType::hexagon:
+     case Triple::ArchType::mips:
+     case Triple::ArchType::mipsel:
+     case Triple::ArchType::mips64:
+diff --git a/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp b/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp
+index f3017d02995e..fba35db31a37 100644
+--- a/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp
++++ b/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp
+@@ -771,6 +771,67 @@ void HexagonAsmPrinter::emitInstruction(const MachineInstr *MI) {
+   OutStreamer->emitInstruction(MCB, getSubtargetInfo());
+ }
+ 
++void HexagonAsmPrinter::EmitSled(const MachineInstr &MI, SledKind Kind) {
++  static const int8_t NoopsInSledCount = 4;
++  // We want to emit the following pattern:
++  //
++  // .L_xray_sled_N:
++  // <xray_sled_base>:
++  // { 	jump .Ltmp0 }
++  // {  nop
++  //    nop
++  //    nop
++  //    nop }
++  // .Ltmp0:
++  //
++  // We need the 4 nop words because at runtime, we'd be patching over the
++  // full 5 words with the following pattern:
++  //
++  // <xray_sled_n>:
++  // { 	immext(#...) // upper 26-bits of trampoline
++  //    r6 = ##...   // lower  6-bits of trampoline
++  //    immext(#...) // upper 26-bits of func id
++  //    r7 = ##... }  // lower 6 bits of func id
++  // { 	callr r6 }
++  //
++  //
++  auto CurSled = OutContext.createTempSymbol("xray_sled_", true);
++  OutStreamer->emitLabel(CurSled);
++
++  MCInst *SledJump = new (OutContext) MCInst();
++  SledJump->setOpcode(Hexagon::J2_jump);
++  auto PostSled = OutContext.createTempSymbol();
++  SledJump->addOperand(MCOperand::createExpr(HexagonMCExpr::create(
++      MCSymbolRefExpr::create(PostSled, OutContext), OutContext)));
++
++  // Emit "jump PostSled" instruction, which jumps over the nop series.
++  MCInst SledJumpPacket;
++  SledJumpPacket.setOpcode(Hexagon::BUNDLE);
++  SledJumpPacket.addOperand(MCOperand::createImm(0));
++  SledJumpPacket.addOperand(MCOperand::createInst(SledJump));
++
++  EmitToStreamer(*OutStreamer, SledJumpPacket);
++
++  // FIXME: this will emit individual packets, we should
++  // special-case this and combine them into a single packet.
++  emitNops(NoopsInSledCount);
++
++  OutStreamer->emitLabel(PostSled);
++  recordSled(CurSled, MI, Kind, 0);
++}
++
++void HexagonAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI) {
++  EmitSled(MI, SledKind::FUNCTION_ENTER);
++}
++
++void HexagonAsmPrinter::LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI) {
++  EmitSled(MI, SledKind::FUNCTION_EXIT);
++}
++
++void HexagonAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI) {
++  EmitSled(MI, SledKind::TAIL_CALL);
++}
++
+ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeHexagonAsmPrinter() {
+   RegisterAsmPrinter<HexagonAsmPrinter> X(getTheHexagonTarget());
+ }
+diff --git a/llvm/lib/Target/Hexagon/HexagonAsmPrinter.h b/llvm/lib/Target/Hexagon/HexagonAsmPrinter.h
+index 3932def87854..93d5f1dce7af 100644
+--- a/llvm/lib/Target/Hexagon/HexagonAsmPrinter.h
++++ b/llvm/lib/Target/Hexagon/HexagonAsmPrinter.h
+@@ -36,7 +36,11 @@ class TargetMachine;
+ 
+     bool runOnMachineFunction(MachineFunction &Fn) override {
+       Subtarget = &Fn.getSubtarget<HexagonSubtarget>();
+-      return AsmPrinter::runOnMachineFunction(Fn);
++      const bool Modified = AsmPrinter::runOnMachineFunction(Fn);
++      // Emit the XRay table for this function.
++      emitXRayTable();
++
++      return Modified;
+     }
+ 
+     StringRef getPassName() const override {
+@@ -47,6 +51,16 @@ class TargetMachine;
+           const override;
+ 
+     void emitInstruction(const MachineInstr *MI) override;
++
++    //===------------------------------------------------------------------===//
++    // XRay implementation
++    //===------------------------------------------------------------------===//
++    // XRay-specific lowering for Hexagon.
++    void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI);
++    void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI);
++    void LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI);
++    void EmitSled(const MachineInstr &MI, SledKind Kind);
++
+     void HexagonProcessInstruction(MCInst &Inst, const MachineInstr &MBB);
+ 
+     void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &O);
+diff --git a/llvm/lib/Target/Hexagon/HexagonInstrInfo.cpp b/llvm/lib/Target/Hexagon/HexagonInstrInfo.cpp
+index 26fc093d15a7..6e077d7698a3 100644
+--- a/llvm/lib/Target/Hexagon/HexagonInstrInfo.cpp
++++ b/llvm/lib/Target/Hexagon/HexagonInstrInfo.cpp
+@@ -4658,3 +4658,13 @@ short HexagonInstrInfo::changeAddrMode_rr_ur(short Opc) const {
+ short HexagonInstrInfo::changeAddrMode_ur_rr(short Opc) const {
+   return Opc >= 0 ? Hexagon::changeAddrMode_ur_rr(Opc) : Opc;
+ }
++
++MCInst HexagonInstrInfo::getNop() const {
++  MCInst *Nop = new MCInst();
++  Nop->setOpcode(Hexagon::A2_nop);
++  MCInst NopBundle;
++  NopBundle.setOpcode(Hexagon::BUNDLE);
++  NopBundle.addOperand(MCOperand::createImm(0));
++  NopBundle.addOperand(MCOperand::createInst(Nop));
++  return NopBundle;
++}
+diff --git a/llvm/lib/Target/Hexagon/HexagonInstrInfo.h b/llvm/lib/Target/Hexagon/HexagonInstrInfo.h
+index 11717996935d..b8367f40a242 100644
+--- a/llvm/lib/Target/Hexagon/HexagonInstrInfo.h
++++ b/llvm/lib/Target/Hexagon/HexagonInstrInfo.h
+@@ -523,6 +523,8 @@ public:
+   short changeAddrMode_ur_rr(const MachineInstr &MI) const {
+     return changeAddrMode_ur_rr(MI.getOpcode());
+   }
++
++  MCInst getNop() const override;
+ };
+ 
+ } // end namespace llvm
+diff --git a/llvm/lib/Target/Hexagon/HexagonMCInstLower.cpp b/llvm/lib/Target/Hexagon/HexagonMCInstLower.cpp
+index 9507de95231f..0eab31744d45 100644
+--- a/llvm/lib/Target/Hexagon/HexagonMCInstLower.cpp
++++ b/llvm/lib/Target/Hexagon/HexagonMCInstLower.cpp
+@@ -104,6 +104,19 @@ void llvm::HexagonLowerToMC(const MCInstrInfo &MCII, const MachineInstr *MI,
+     HexagonMCInstrInfo::setOuterLoop(MCB);
+     return;
+   }
++  if (MI->getOpcode() == Hexagon::PATCHABLE_FUNCTION_ENTER) {
++    AP.EmitSled(*MI, HexagonAsmPrinter::SledKind::FUNCTION_ENTER);
++    return;
++  }
++  if (MI->getOpcode() == Hexagon::PATCHABLE_FUNCTION_EXIT) {
++    AP.EmitSled(*MI, HexagonAsmPrinter::SledKind::FUNCTION_EXIT);
++    return;
++  }
++  if (MI->getOpcode() == Hexagon::PATCHABLE_TAIL_CALL) {
++    AP.EmitSled(*MI, HexagonAsmPrinter::SledKind::TAIL_CALL);
++    return;
++  }
++
+   MCInst *MCI = AP.OutContext.createMCInst();
+   MCI->setOpcode(MI->getOpcode());
+   assert(MCI->getOpcode() == static_cast<unsigned>(MI->getOpcode()) &&
+diff --git a/llvm/lib/Target/Hexagon/HexagonSubtarget.h b/llvm/lib/Target/Hexagon/HexagonSubtarget.h
+index 7b7fb8d04f47..2928375c1e40 100644
+--- a/llvm/lib/Target/Hexagon/HexagonSubtarget.h
++++ b/llvm/lib/Target/Hexagon/HexagonSubtarget.h
+@@ -137,6 +137,8 @@ public:
+   /// subtarget options.  Definition of function is auto generated by tblgen.
+   void ParseSubtargetFeatures(StringRef CPU, StringRef TuneCPU, StringRef FS);
+ 
++  bool isXRaySupported() const override { return true; }
++
+   bool hasV5Ops() const {
+     return getHexagonArchVersion() >= Hexagon::ArchEnum::V5;
+   }
+diff --git a/llvm/lib/Target/Hexagon/HexagonVLIWPacketizer.cpp b/llvm/lib/Target/Hexagon/HexagonVLIWPacketizer.cpp
+index fa1ba4f2e469..edbbd83bb18d 100644
+--- a/llvm/lib/Target/Hexagon/HexagonVLIWPacketizer.cpp
++++ b/llvm/lib/Target/Hexagon/HexagonVLIWPacketizer.cpp
+@@ -1085,6 +1085,11 @@ bool HexagonPacketizerList::isSoloInstruction(const MachineInstr &MI) {
+   if (HII->isSolo(MI))
+     return true;
+ 
++  if (MI.getOpcode() == Hexagon::PATCHABLE_FUNCTION_ENTER ||
++      MI.getOpcode() == Hexagon::PATCHABLE_FUNCTION_EXIT ||
++      MI.getOpcode() == Hexagon::PATCHABLE_TAIL_CALL)
++    return true;
++
+   if (MI.getOpcode() == Hexagon::A2_nop)
+     return true;
+ 
+diff --git a/llvm/test/CodeGen/Hexagon/xray-pred-ret.ll b/llvm/test/CodeGen/Hexagon/xray-pred-ret.ll
+new file mode 100644
+index 000000000000..c7d533305925
+--- /dev/null
++++ b/llvm/test/CodeGen/Hexagon/xray-pred-ret.ll
+@@ -0,0 +1,27 @@
++; RUN: llc -filetype=asm -o - -mtriple=hexagon-unknown-linux-musl < %s | FileCheck %s
++
++define void @Foo(i32 signext %a, i32 signext %b) #0 {
++; CHECK-LABEL: @Foo
++; CHECK-LABEL: .Lxray_sled_0:
++; CHECK:        jump .Ltmp0
++; CHECK-COUNT-4: nop
++entry:
++  %cmp = icmp sgt i32 %a, %b
++  br i1 %cmp, label %return, label %if.end
++
++; CHECK-LABEL: .Lxray_sled_1:
++; CHECK:        jump .Ltmp1
++; CHECK-COUNT-4: nop
++; CHECK-LABEL: .Ltmp1:
++; CHECK:       if (p0) jumpr:nt r31
++if.end:
++  tail call void @Bar()
++  br label %return
++
++return:
++  ret void
++}
++
++declare void @Bar()
++
++attributes #0 = { "function-instrument"="xray-always" }
+diff --git a/llvm/test/CodeGen/Hexagon/xray.ll b/llvm/test/CodeGen/Hexagon/xray.ll
+new file mode 100644
+index 000000000000..ba5913a12de3
+--- /dev/null
++++ b/llvm/test/CodeGen/Hexagon/xray.ll
+@@ -0,0 +1,29 @@
++; RUN: llc -filetype=asm -o - -mtriple=hexagon-unknown-elf < %s | FileCheck %s
++; RUN: llc -filetype=asm -o - -mtriple=hexagon-unknown-linux-musl  < %s | FileCheck %s
++
++define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always" {
++; CHECK-LABEL: .Lxray_sled_0:
++; CHECK:       jump .Ltmp0
++; CHECK:         nop
++; CHECK:         nop
++; CHECK:         nop
++; CHECK:         nop
++; CHECK-LABEL: .Ltmp0:
++  ret i32 0
++; CHECK-LABEL: .Lxray_sled_1:
++; CHECK:       jump .Ltmp1
++; CHECK:         nop
++; CHECK:         nop
++; CHECK:         nop
++; CHECK:         nop
++; CHECK-LABEL: .Ltmp1:
++; CHECK:       jumpr r31
++}
++; CHECK-LABEL: xray_instr_map
++; CHECK-LABEL: .Lxray_sleds_start0:
++; CHECK:       .word {{.*}}Lxray_sled_0
++; CHECK:       .word {{.*}}Lxray_sled_1
++; CHECK-LABEL: .Lxray_sleds_end0:
++; CHECK-LABEL: xray_fn_idx
++; CHECK:       .word {{.*}}Lxray_sleds_start0
++; CHECK-NEXT:  .word {{.*}}Lxray_sleds_end0
+-- 
+2.39.3
+

@@ -1,0 +1,26 @@
+From 51b568748d147dde41300c380b5221ac01d890b9 Mon Sep 17 00:00:00 2001
+From: Simon Pilgrim <llvm-dev@redking.me.uk>
+Date: Sat, 5 Jun 2021 21:32:41 +0100
+Subject: [PATCH] xray-color-helper.cpp - add missing implicit cmath header
+ dependency. NFCI.
+
+Noticed while investigating if we can remove an unnecessary MathExtras.h include from SmallVector.h (necessary for gcc builds but not MSVC)
+---
+ llvm/tools/llvm-xray/xray-color-helper.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/llvm/tools/llvm-xray/xray-color-helper.cpp b/llvm/tools/llvm-xray/xray-color-helper.cpp
+index ea7ff357826b..e2cae21e162b 100644
+--- a/llvm/tools/llvm-xray/xray-color-helper.cpp
++++ b/llvm/tools/llvm-xray/xray-color-helper.cpp
+@@ -13,6 +13,7 @@
+ #include "xray-color-helper.h"
+ #include "llvm/Support/FormatVariadic.h"
+ #include "llvm/Support/raw_ostream.h"
++#include <cmath>
+ 
+ using namespace llvm;
+ using namespace xray;
+-- 
+2.39.3
+

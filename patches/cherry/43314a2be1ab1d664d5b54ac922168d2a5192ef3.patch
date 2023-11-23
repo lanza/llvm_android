@@ -1,0 +1,495 @@
+From 43314a2be1ab1d664d5b54ac922168d2a5192ef3 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Fri, 23 Jun 2023 09:24:18 -0700
+Subject: [PATCH] [XRay][AArch64] Suppport __xray_customevent/__xray_typedevent
+
+`__xray_customevent` and `__xray_typedevent` are built-in functions in Clang.
+With -fxray-instrument, they are lowered to intrinsics llvm.xray.customevent and
+llvm.xray.typedevent, respectively. These intrinsics are then lowered to
+TargetOpcode::{PATCHABLE_EVENT_CALL,PATCHABLE_TYPED_EVENT_CALL}. The target is
+responsible for generating a code sequence that calls either
+`__xray_CustomEvent` (with 2 arguments) or `__xray_TypedEvent` (with 3
+arguments).
+
+Before patching, the code sequence is prefixed by a branch instruction that
+skips the rest of the code sequence. After patching
+(compiler-rt/lib/xray/xray_AArch64.cpp), the branch instruction becomes a NOP
+and the function call will take effects.
+
+This patch implements the lowering process for
+{PATCHABLE_EVENT_CALL,PATCHABLE_TYPED_EVENT_CALL} and implements the runtime.
+
+```
+// Lowering of PATCHABLE_EVENT_CALL
+.Lxray_sled_N:
+  b  #24
+  stp x0, x1, [sp, #-16]!
+  x0 = reg of op0
+  x1 = reg of op1
+  bl __xray_CustomEvent
+  ldrp x0, x1, [sp], #16
+```
+
+As a result, two updated tests in compiler-rt/test/xray/TestCases/Posix/ now
+pass on AArch64.
+
+Reviewed By: peter.smith
+
+Differential Revision: https://reviews.llvm.org/D153320
+
+Change-Id: Ie26bf97399ac01849a97c4856d0eacfcd59410a9
+---
+ compiler-rt/lib/xray/xray_AArch64.cpp         |  28 +++-
+ .../lib/xray/xray_trampoline_AArch64.S        |  28 ++++
+ .../TestCases/Posix/custom-event-logging.cpp  |   2 +-
+ .../TestCases/Posix/typed-event-logging.cpp   |   2 +-
+ llvm/lib/CodeGen/SelectionDAG/FastISel.cpp    |   4 +-
+ .../SelectionDAG/SelectionDAGBuilder.cpp      |  10 +-
+ llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp |  99 +++++++++++++
+ .../Target/AArch64/AArch64ISelLowering.cpp    |   4 +
+ llvm/test/CodeGen/AArch64/xray-custom-log.ll  | 134 ++++++++++++++++++
+ 9 files changed, 298 insertions(+), 13 deletions(-)
+ create mode 100644 llvm/test/CodeGen/AArch64/xray-custom-log.ll
+
+diff --git a/compiler-rt/lib/xray/xray_AArch64.cpp b/compiler-rt/lib/xray/xray_AArch64.cpp
+index 00105d30b4db..8cc54016a292 100644
+--- a/compiler-rt/lib/xray/xray_AArch64.cpp
++++ b/compiler-rt/lib/xray/xray_AArch64.cpp
+@@ -105,15 +105,37 @@ bool patchFunctionTailExit(const bool Enable, const uint32_t FuncId,
+   return patchSled(Enable, FuncId, Sled, __xray_FunctionTailExit);
+ }
+ 
++// AArch64AsmPrinter::LowerPATCHABLE_EVENT_CALL generates this code sequence:
++//
++// .Lxray_event_sled_N:
++//   b 1f
++//   save x0 and x1 (and also x2 for TYPED_EVENT_CALL)
++//   set up x0 and x1 (and also x2 for TYPED_EVENT_CALL)
++//   bl __xray_CustomEvent or __xray_TypedEvent
++//   restore x0 and x1 (and also x2 for TYPED_EVENT_CALL)
++// 1f
++//
++// There are 6 instructions for EVENT_CALL and 9 for TYPED_EVENT_CALL.
++//
++// Enable: b .+24 => nop
++// Disable: nop => b .+24
+ bool patchCustomEvent(const bool Enable, const uint32_t FuncId,
+-                      const XRaySledEntry &Sled)
+-    XRAY_NEVER_INSTRUMENT { // FIXME: Implement in aarch64?
++                      const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  uint32_t Inst = Enable ? 0xd503201f : 0x14000006;
++  std::atomic_store_explicit(
++      reinterpret_cast<std::atomic<uint32_t> *>(Sled.address()), Inst,
++      std::memory_order_release);
+   return false;
+ }
+ 
++// Enable: b +36 => nop
++// Disable: nop => b +36
+ bool patchTypedEvent(const bool Enable, const uint32_t FuncId,
+                      const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
+-  // FIXME: Implement in aarch64?
++  uint32_t Inst = Enable ? 0xd503201f : 0x14000009;
++  std::atomic_store_explicit(
++      reinterpret_cast<std::atomic<uint32_t> *>(Sled.address()), Inst,
++      std::memory_order_release);
+   return false;
+ }
+ 
+diff --git a/compiler-rt/lib/xray/xray_trampoline_AArch64.S b/compiler-rt/lib/xray/xray_trampoline_AArch64.S
+index eea56d7f0a87..c3d93f579082 100644
+--- a/compiler-rt/lib/xray/xray_trampoline_AArch64.S
++++ b/compiler-rt/lib/xray/xray_trampoline_AArch64.S
+@@ -103,4 +103,32 @@ ASM_SYMBOL(__xray_FunctionTailExit):
+   RESTORE_REGISTERS
+   ret
+ 
++.global ASM_SYMBOL(__xray_CustomEvent)
++ASM_HIDDEN(__xray_CustomEvent)
++ASM_TYPE_FUNCTION(__xray_CustomEvent)
++ASM_SYMBOL(__xray_CustomEvent):
++  SAVE_REGISTERS
++  adrp x8, ASM_SYMBOL(_ZN6__xray22XRayPatchedCustomEventE)
++  ldr x8, [x8, #:lo12:ASM_SYMBOL(_ZN6__xray22XRayPatchedCustomEventE)]
++  cbz x8, 1f
++  blr x8
++1:
++  RESTORE_REGISTERS
++  ret
++ASM_SIZE(__xray_CustomEvent)
++
++.global ASM_SYMBOL(__xray_TypedEvent)
++ASM_HIDDEN(__xray_TypedEvent)
++ASM_TYPE_FUNCTION(__xray_TypedEvent)
++ASM_SYMBOL(__xray_TypedEvent):
++  SAVE_REGISTERS
++  adrp x8, ASM_SYMBOL(_ZN6__xray21XRayPatchedTypedEventE)
++  ldr x8, [x8, #:lo12:ASM_SYMBOL(_ZN6__xray21XRayPatchedTypedEventE)]
++  cbz x8, 1f
++  blr x8
++1:
++  RESTORE_REGISTERS
++  ret
++ASM_SIZE(__xray_TypedEvent)
++
+ NO_EXEC_STACK_DIRECTIVE
+diff --git a/compiler-rt/test/xray/TestCases/Posix/custom-event-logging.cpp b/compiler-rt/test/xray/TestCases/Posix/custom-event-logging.cpp
+index d879270e33bc..30f4fffa429e 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/custom-event-logging.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/custom-event-logging.cpp
+@@ -5,7 +5,7 @@
+ // RUN: %clangxx_xray -std=c++11 -fpic -fpie %s -o %t
+ // RUN: XRAY_OPTIONS="patch_premain=false verbosity=1 xray_logfile_base=custom-event-logging.xray-" %run %t 2>&1 | FileCheck %s
+ // FIXME: Support this in non-x86_64 as well
+-// REQUIRES: x86_64-linux
++// REQUIRES: target={{(aarch64|x86_64)-.*linux.*}}
+ // REQUIRES: built-in-llvm-tree
+ #include <cstdio>
+ #include "xray/xray_interface.h"
+diff --git a/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp b/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
+index 103b11cfb097..35877cb94397 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
+@@ -1,7 +1,7 @@
+ // RUN: %clangxx_xray %s -o %t
+ // RUN: XRAY_OPTIONS=patch_premain=false:verbosity=1 %run %t 2>&1 | FileCheck %s
+ 
+-// REQUIRES: target={{x86_64-.*linux.*}}
++// REQUIRES: target={{(aarch64|x86_64)-.*linux.*}}
+ 
+ #include <assert.h>
+ #include <stdio.h>
+diff --git a/llvm/lib/CodeGen/SelectionDAG/FastISel.cpp b/llvm/lib/CodeGen/SelectionDAG/FastISel.cpp
+index c018f1647169..9cd2ab278924 100644
+--- a/llvm/lib/CodeGen/SelectionDAG/FastISel.cpp
++++ b/llvm/lib/CodeGen/SelectionDAG/FastISel.cpp
+@@ -950,7 +950,7 @@ bool FastISel::selectPatchpoint(const CallInst *I) {
+ 
+ bool FastISel::selectXRayCustomEvent(const CallInst *I) {
+   const auto &Triple = TM.getTargetTriple();
+-  if (Triple.getArch() != Triple::x86_64 || !Triple.isOSLinux())
++  if (Triple.isAArch64(64) && Triple.getArch() != Triple::x86_64)
+     return true; // don't do anything to this instruction.
+   SmallVector<MachineOperand, 8> Ops;
+   Ops.push_back(MachineOperand::CreateReg(getRegForValue(I->getArgOperand(0)),
+@@ -969,7 +969,7 @@ bool FastISel::selectXRayCustomEvent(const CallInst *I) {
+ 
+ bool FastISel::selectXRayTypedEvent(const CallInst *I) {
+   const auto &Triple = TM.getTargetTriple();
+-  if (Triple.getArch() != Triple::x86_64 || !Triple.isOSLinux())
++  if (Triple.isAArch64(64) && Triple.getArch() != Triple::x86_64)
+     return true; // don't do anything to this instruction.
+   SmallVector<MachineOperand, 8> Ops;
+   Ops.push_back(MachineOperand::CreateReg(getRegForValue(I->getArgOperand(0)),
+diff --git a/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp b/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
+index 0a1489c58951..dbbe566fec25 100644
+--- a/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
++++ b/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
+@@ -6779,10 +6779,9 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
+   }
+   case Intrinsic::xray_customevent: {
+     // Here we want to make sure that the intrinsic behaves as if it has a
+-    // specific calling convention, and only for x86_64.
+-    // FIXME: Support other platforms later.
++    // specific calling convention.
+     const auto &Triple = DAG.getTarget().getTargetTriple();
+-    if (Triple.getArch() != Triple::x86_64)
++    if (!Triple.isAArch64(64) && Triple.getArch() != Triple::x86_64)
+       return;
+ 
+     SDLoc DL = getCurSDLoc();
+@@ -6810,10 +6809,9 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
+   }
+   case Intrinsic::xray_typedevent: {
+     // Here we want to make sure that the intrinsic behaves as if it has a
+-    // specific calling convention, and only for x86_64.
+-    // FIXME: Support other platforms later.
++    // specific calling convention.
+     const auto &Triple = DAG.getTarget().getTargetTriple();
+-    if (Triple.getArch() != Triple::x86_64)
++    if (!Triple.isAArch64(64) && Triple.getArch() != Triple::x86_64)
+       return;
+ 
+     SDLoc DL = getCurSDLoc();
+diff --git a/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp b/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
+index c7fa49c965a8..b1f030ddfea9 100644
+--- a/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
++++ b/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
+@@ -105,6 +105,7 @@ public:
+   void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI);
+   void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI);
+   void LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI);
++  void LowerPATCHABLE_EVENT_CALL(const MachineInstr &MI, bool Typed);
+ 
+   typedef std::tuple<unsigned, bool, uint32_t> HwasanMemaccessTuple;
+   std::map<HwasanMemaccessTuple, MCSymbol *> HwasanMemaccessSymbols;
+@@ -288,6 +289,100 @@ void AArch64AsmPrinter::EmitSled(const MachineInstr &MI, SledKind Kind)
+   recordSled(CurSled, MI, Kind, 2);
+ }
+ 
++// Emit the following code for Intrinsic::{xray_customevent,xray_typedevent}
++// (built-in functions __xray_customevent/__xray_typedevent).
++//
++// .Lxray_event_sled_N:
++//   b 1f
++//   save x0 and x1 (and also x2 for TYPED_EVENT_CALL)
++//   set up x0 and x1 (and also x2 for TYPED_EVENT_CALL)
++//   bl __xray_CustomEvent or __xray_TypedEvent
++//   restore x0 and x1 (and also x2 for TYPED_EVENT_CALL)
++// 1:
++//
++// There are 6 instructions for EVENT_CALL and 9 for TYPED_EVENT_CALL.
++//
++// Then record a sled of kind CUSTOM_EVENT or TYPED_EVENT.
++// After patching, b .+N will become a nop.
++void AArch64AsmPrinter::LowerPATCHABLE_EVENT_CALL(const MachineInstr &MI,
++                                                  bool Typed) {
++  auto &O = *OutStreamer;
++  MCSymbol *CurSled = OutContext.createTempSymbol("xray_sled_", true);
++  O.emitLabel(CurSled);
++  MCInst MovX0Op0 = MCInstBuilder(AArch64::ORRXrs)
++                        .addReg(AArch64::X0)
++                        .addReg(AArch64::XZR)
++                        .addReg(MI.getOperand(0).getReg())
++                        .addImm(0);
++  MCInst MovX1Op1 = MCInstBuilder(AArch64::ORRXrs)
++                        .addReg(AArch64::X1)
++                        .addReg(AArch64::XZR)
++                        .addReg(MI.getOperand(1).getReg())
++                        .addImm(0);
++  bool MachO = TM.getTargetTriple().isOSBinFormatMachO();
++  auto *Sym = MCSymbolRefExpr::create(
++      OutContext.getOrCreateSymbol(
++          Twine(MachO ? "_" : "") +
++          (Typed ? "__xray_TypedEvent" : "__xray_CustomEvent")),
++      OutContext);
++  if (Typed) {
++    O.AddComment("Begin XRay typed event");
++    EmitToStreamer(O, MCInstBuilder(AArch64::B).addImm(9));
++    EmitToStreamer(O, MCInstBuilder(AArch64::STPXpre)
++                          .addReg(AArch64::SP)
++                          .addReg(AArch64::X0)
++                          .addReg(AArch64::X1)
++                          .addReg(AArch64::SP)
++                          .addImm(-4));
++    EmitToStreamer(O, MCInstBuilder(AArch64::STRXui)
++                          .addReg(AArch64::X2)
++                          .addReg(AArch64::SP)
++                          .addImm(2));
++    EmitToStreamer(O, MovX0Op0);
++    EmitToStreamer(O, MovX1Op1);
++    EmitToStreamer(O, MCInstBuilder(AArch64::ORRXrs)
++                          .addReg(AArch64::X2)
++                          .addReg(AArch64::XZR)
++                          .addReg(MI.getOperand(2).getReg())
++                          .addImm(0));
++    EmitToStreamer(O, MCInstBuilder(AArch64::BL).addExpr(Sym));
++    EmitToStreamer(O, MCInstBuilder(AArch64::LDRXui)
++                          .addReg(AArch64::X2)
++                          .addReg(AArch64::SP)
++                          .addImm(2));
++    O.AddComment("End XRay typed event");
++    EmitToStreamer(O, MCInstBuilder(AArch64::LDPXpost)
++                          .addReg(AArch64::SP)
++                          .addReg(AArch64::X0)
++                          .addReg(AArch64::X1)
++                          .addReg(AArch64::SP)
++                          .addImm(4));
++
++    recordSled(CurSled, MI, SledKind::TYPED_EVENT, 2);
++  } else {
++    O.AddComment("Begin XRay custom event");
++    EmitToStreamer(O, MCInstBuilder(AArch64::B).addImm(6));
++    EmitToStreamer(O, MCInstBuilder(AArch64::STPXpre)
++                          .addReg(AArch64::SP)
++                          .addReg(AArch64::X0)
++                          .addReg(AArch64::X1)
++                          .addReg(AArch64::SP)
++                          .addImm(-2));
++    EmitToStreamer(O, MovX0Op0);
++    EmitToStreamer(O, MovX1Op1);
++    EmitToStreamer(O, MCInstBuilder(AArch64::BL).addExpr(Sym));
++    O.AddComment("End XRay custom event");
++    EmitToStreamer(O, MCInstBuilder(AArch64::LDPXpost)
++                          .addReg(AArch64::SP)
++                          .addReg(AArch64::X0)
++                          .addReg(AArch64::X1)
++                          .addReg(AArch64::SP)
++                          .addImm(2));
++
++    recordSled(CurSled, MI, SledKind::CUSTOM_EVENT, 2);
++  }
++}
++
+ void AArch64AsmPrinter::LowerHWASAN_CHECK_MEMACCESS(const MachineInstr &MI) {
+   Register Reg = MI.getOperand(0).getReg();
+   bool IsShort =
+@@ -1337,6 +1432,10 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
+   case TargetOpcode::PATCHABLE_TAIL_CALL:
+     LowerPATCHABLE_TAIL_CALL(*MI);
+     return;
++  case TargetOpcode::PATCHABLE_EVENT_CALL:
++    return LowerPATCHABLE_EVENT_CALL(*MI, false);
++  case TargetOpcode::PATCHABLE_TYPED_EVENT_CALL:
++    return LowerPATCHABLE_EVENT_CALL(*MI, true);
+ 
+   case AArch64::HWASAN_CHECK_MEMACCESS:
+   case AArch64::HWASAN_CHECK_MEMACCESS_SHORTGRANULES:
+diff --git a/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp b/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp
+index 6e4ac0f711dd..4b15f3ffed92 100644
+--- a/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp
++++ b/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp
+@@ -2082,6 +2082,10 @@ MachineBasicBlock *AArch64TargetLowering::EmitInstrWithCustomInserter(
+   case TargetOpcode::STATEPOINT:
+     return emitPatchPoint(MI, BB);
+ 
++  case TargetOpcode::PATCHABLE_EVENT_CALL:
++  case TargetOpcode::PATCHABLE_TYPED_EVENT_CALL:
++    return BB;
++
+   case AArch64::CATCHRET:
+     return EmitLoweredCatchRet(MI, BB);
+   }
+diff --git a/llvm/test/CodeGen/AArch64/xray-custom-log.ll b/llvm/test/CodeGen/AArch64/xray-custom-log.ll
+new file mode 100644
+index 000000000000..fd8ddf93fcbf
+--- /dev/null
++++ b/llvm/test/CodeGen/AArch64/xray-custom-log.ll
+@@ -0,0 +1,134 @@
++; RUN: llc -mtriple=aarch64 < %s | FileCheck %s
++; RUN: llc -mtriple=arm64-apple-darwin < %s | FileCheck %s --check-prefix=MACHO
++; RUN: llc -filetype=obj -mtriple=aarch64 %s -o %t
++; RUN: llvm-dwarfdump -debug-info %t | FileCheck %s --check-prefix=DBG
++
++; MACHO:         bl      ___xray_CustomEvent
++; MACHO:         bl      ___xray_CustomEvent
++; MACHO:         bl      ___xray_TypedEvent
++; MACHO:         bl      ___xray_TypedEvent
++
++; CHECK-LABEL: customevent:
++; CHECK:       Lxray_sled_1:
++; CHECK-NEXT:    b       #24                             // Begin XRay custom event
++; CHECK-NEXT:    stp     x0, x1, [sp, #-16]!
++; CHECK-NEXT:    mov     x0, x0
++; CHECK-NEXT:    mov     x1, x1
++; CHECK-NEXT:    bl      __xray_CustomEvent
++; CHECK-NEXT:    ldp     x0, x1, [sp], #16               // End XRay custom event
++; CHECK-NEXT:  Ltmp[[#]]:
++; CHECK-NEXT:    .loc    0 3 3                           // a.c:3:3
++; CHECK-NEXT:  Lxray_sled_2:
++; CHECK-NEXT:    b       #24                             // Begin XRay custom event
++; CHECK-NEXT:    stp     x0, x1, [sp, #-16]!
++; CHECK-NEXT:    mov     x0, x2
++; CHECK-NEXT:    mov     x1, x3
++; CHECK-NEXT:    bl      __xray_CustomEvent
++; CHECK-NEXT:    ldp     x0, x1, [sp], #16               // End XRay custom event
++; CHECK-NEXT:  .Ltmp[[#]]:
++; CHECK-NEXT:    .loc    0 4 1                           // a.c:4:1
++define void @customevent(ptr nocapture noundef readonly %e1, i64 noundef %s1, ptr nocapture noundef readonly %e2, i64 noundef %s2) "function-instrument"="xray-always" !dbg !11 {
++entry:
++  tail call void @llvm.xray.customevent(ptr %e1, i64 %s1), !dbg !22
++  tail call void @llvm.xray.customevent(ptr %e2, i64 %s2), !dbg !23
++  ret void, !dbg !24
++}
++
++; CHECK:         .xword  .Lxray_sled_1-.Ltmp[[#]]
++; CHECK-NEXT:    .xword  .Lfunc_begin0-(.Ltmp[[#]]+8)
++; CHECK-NEXT:    .byte   0x04
++; CHECK-NEXT:    .byte   0x01
++; CHECK-NEXT:    .byte   0x02
++; CHECK-NEXT:    .zero   13
++; CHECK:         .xword  .Lxray_sled_2-.Ltmp[[#]]
++; CHECK-NEXT:    .xword  .Lfunc_begin0-(.Ltmp[[#]]+8)
++; CHECK-NEXT:    .byte   0x04
++; CHECK-NEXT:    .byte   0x01
++; CHECK-NEXT:    .byte   0x02
++; CHECK-NEXT:    .zero   13
++
++; CHECK-LABEL: typedevent:
++; CHECK:       .Lxray_sled_5:
++; CHECK-NEXT:    b       #36                             // Begin XRay typed event
++; CHECK-NEXT:    stp     x0, x1, [sp, #-32]!
++; CHECK-NEXT:    str     x2, [sp, #16]
++; CHECK-NEXT:    mov     x0, x0
++; CHECK-NEXT:    mov     x1, x1
++; CHECK-NEXT:    mov     x2, x2
++; CHECK-NEXT:    bl      __xray_TypedEvent
++; CHECK-NEXT:    ldr     x2, [sp, #16]
++; CHECK-NEXT:    ldp     x0, x1, [sp], #32               // End XRay typed event
++; CHECK-NEXT:  .Ltmp[[#]]:
++; CHECK-NEXT:    .loc    0 8 3                           // a.c:8:3
++; CHECK-NEXT:  .Lxray_sled_6:
++; CHECK-NEXT:    b       #36                             // Begin XRay typed event
++; CHECK-NEXT:    stp     x0, x1, [sp, #-32]!
++; CHECK-NEXT:    str     x2, [sp, #16]
++; CHECK-NEXT:    mov     x0, x2
++; CHECK-NEXT:    mov     x1, x1
++; CHECK-NEXT:    mov     x2, x0
++; CHECK-NEXT:    bl      __xray_TypedEvent
++; CHECK-NEXT:    ldr     x2, [sp, #16]
++; CHECK-NEXT:    ldp     x0, x1, [sp], #32               // End XRay typed event
++; CHECK-NEXT:  .Ltmp[[#]]:
++; CHECK-NEXT:    .loc    0 9 1                           // a.c:9:1
++define void @typedevent(i64 noundef %type, ptr nocapture noundef readonly %event, i64 noundef %size) "function-instrument"="xray-always" !dbg !25 {
++entry:
++  tail call void @llvm.xray.typedevent(i64 %type, ptr %event, i64 %size), !dbg !33
++  tail call void @llvm.xray.typedevent(i64 %size, ptr %event, i64 %type), !dbg !34
++  ret void, !dbg !35
++}
++
++; CHECK:         .xword  .Lxray_sled_5-.Ltmp[[#]]
++; CHECK-NEXT:    .xword  .Lfunc_begin1-(.Ltmp[[#]]+8)
++; CHECK-NEXT:    .byte   0x05
++; CHECK-NEXT:    .byte   0x01
++; CHECK-NEXT:    .byte   0x02
++; CHECK-NEXT:    .zero   13
++; CHECK:         .xword  .Lxray_sled_6-.Ltmp[[#]]
++; CHECK-NEXT:    .xword  .Lfunc_begin1-(.Ltmp[[#]]+8)
++; CHECK-NEXT:    .byte   0x05
++; CHECK-NEXT:    .byte   0x01
++; CHECK-NEXT:    .byte   0x02
++; CHECK-NEXT:    .zero   13
++
++;; Construct call site entries for PATCHABLE_EVENT_CALL.
++; DBG:      DW_TAG_subprogram
++; DBG:      DW_AT_name
++; DBG-SAME:            ("customevent")
++; DBG:        DW_TAG_call_site
++; DBG-NEXT:     DW_AT_call_target (DW_OP_reg0 {{.*}})
++; DBG-NEXT:     DW_AT_call_return_pc
++; DBG-EMPTY:
++; DBG:        DW_TAG_call_site
++; DBG-NEXT:     DW_AT_call_target (DW_OP_reg2 {{.*}})
++; DBG-NEXT:     DW_AT_call_return_pc
++
++declare void @llvm.xray.customevent(ptr, i64)
++declare void @llvm.xray.typedevent(i64, ptr, i64)
++
++!llvm.dbg.cu = !{!0}
++!llvm.module.flags = !{!2, !3}
++!llvm.ident = !{!10}
++
++!0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, producer: "clang version 17.0.0", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, splitDebugInlining: false, nameTableKind: None)
++!1 = !DIFile(filename: "a.c", directory: "/tmp")
++!2 = !{i32 7, !"Dwarf Version", i32 5}
++!3 = !{i32 2, !"Debug Info Version", i32 3}
++!10 = !{!"clang version 17.0.0"}
++!11 = distinct !DISubprogram(name: "customevent", scope: !1, file: !1, line: 1, type: !12, scopeLine: 1, flags: DIFlagPrototyped | DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0)
++!12 = !DISubroutineType(types: !13)
++!13 = !{null, !14, !15, !14, !15}
++!14 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: null, size: 64)
++!15 = !DIBasicType(name: "unsigned long", size: 64, encoding: DW_ATE_unsigned)
++!21 = !DILocation(line: 0, scope: !11)
++!22 = !DILocation(line: 2, column: 3, scope: !11)
++!23 = !DILocation(line: 3, column: 3, scope: !11)
++!24 = !DILocation(line: 4, column: 1, scope: !11)
++!25 = distinct !DISubprogram(name: "typedevent", scope: !1, file: !1, line: 6, type: !26, scopeLine: 6, flags: DIFlagPrototyped | DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0)
++!26 = !DISubroutineType(types: !27)
++!27 = !{null, !15, !14, !15}
++!32 = !DILocation(line: 0, scope: !25)
++!33 = !DILocation(line: 7, column: 3, scope: !25)
++!34 = !DILocation(line: 8, column: 3, scope: !25)
++!35 = !DILocation(line: 9, column: 1, scope: !25)
+-- 
+2.39.3
+

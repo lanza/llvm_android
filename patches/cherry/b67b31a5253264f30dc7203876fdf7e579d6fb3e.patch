@@ -1,0 +1,372 @@
+From b67b31a5253264f30dc7203876fdf7e579d6fb3e Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Thu, 22 Jun 2023 10:03:17 -0700
+Subject: [PATCH] [XRay] Make xray_instr_map compatible with Mach-O
+
+The `__DATA,xray_instr_map` section has label differences like
+`.quad Lxray_sled_0-Ltmp0` that is represented as a pair of UNSIGNED and SUBTRACTOR relocations.
+
+LLVM integrated assembler attempts to rewrite A-B into A-B'+offset where B' can
+be included in the symbol table. B' is called an atom and should be a
+non-temporary symbol in the same section. However, since `xray_instr_map` does
+not define a non-temporary symbol, the SUBTRACTOR relocation will have no
+associated symbol, and its `r_extern` value will be 0. Therefore, we will see
+linker errors like:
+
+    error: SUBTRACTOR relocation must be extern at offset 0 of __DATA,xray_instr_map in a.o
+
+To fix this issue, we need to define a non-temporary symbol in the section. We
+can accomplish this by renaming `Lxray_sleds_start0` to `lxray_sleds_start0`
+("L" to "l").
+
+`lxray_sleds_start0` serves as the atom for this dead-strippable subsection.
+With the `S_ATTR_LIVE_SUPPORT` attribute, `ld -dead_strip` will retain
+subsections that reference live functions.
+
+Special thanks to Oleksii Lozovskyi for reporting the issue and providing
+initial analysis.
+
+Differential Revision: https://reviews.llvm.org/D153239
+
+Change-Id: I87abe83990588e942b6d8957165433299ea022ff
+---
+ llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp         |  5 +++--
+ .../AArch64/xray-attribute-instrumentation.ll      |  6 +++---
+ .../CodeGen/AArch64/xray-omit-function-index.ll    |  2 +-
+ .../xray-partial-instrumentation-skip-entry.ll     |  2 +-
+ .../xray-partial-instrumentation-skip-exit.ll      |  2 +-
+ llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll   |  8 ++++----
+ .../ARM/xray-armv6-attribute-instrumentation.ll    |  4 ++--
+ .../ARM/xray-armv7-attribute-instrumentation.ll    |  4 ++--
+ .../CodeGen/X86/xray-attribute-instrumentation.ll  |  8 ++++----
+ llvm/test/CodeGen/X86/xray-log-args.ll             |  4 ++--
+ .../X86/xray-partial-instrumentation-skip-entry.ll |  8 ++++----
+ .../X86/xray-partial-instrumentation-skip-exit.ll  | 14 ++++++++------
+ llvm/test/CodeGen/X86/xray-tail-call-sled.ll       |  8 ++++----
+ 13 files changed, 39 insertions(+), 36 deletions(-)
+
+diff --git a/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp b/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
+index a34afe9be0e3..5ba6a79abad2 100644
+--- a/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
++++ b/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
+@@ -3403,8 +3403,9 @@ void AsmPrinter::emitXRayTable() {
+   // per-function, we are able to create an index entry that will represent the
+   // range of sleds associated with a function.
+   auto &Ctx = OutContext;
+-  MCSymbol *SledsStart = OutContext.createTempSymbol("xray_sleds_start", true);
+-  OutStreamer->SwitchSection(InstMap);
++  MCSymbol *SledsStart =
++      OutContext.createLinkerPrivateSymbol("xray_sleds_start");
++  OutStreamer->switchSection(InstMap);
+   OutStreamer->emitLabel(SledsStart);
+   for (const auto &Sled : Sleds) {
+     MCSymbol *Dot = Ctx.createTempSymbol();
+diff --git a/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
+index f196a5dc89ba..a1017891db7d 100644
+--- a/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
+@@ -22,7 +22,7 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-LABEL: Lxray_sleds_end0:
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS:         .quad Lxray_sled_1
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+@@ -48,7 +48,7 @@ define i32 @bar() nounwind noinline uwtable "function-instrument"="xray-never" "
+ ; CHECK-LINUX-LABEL: Lxray_sleds_end1:
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start1:
++; CHECK-MACOS-LABEL: lxray_sleds_start1:
+ ; CHECK-MACOS:         .quad Lxray_sled_2
+ ; CHECK-MACOS:         .quad Lxray_sled_3
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end1:
+@@ -74,7 +74,7 @@ define i32 @instrumented() nounwind noinline uwtable "xray-instruction-threshold
+ ; CHECK-LINUX-LABEL: Lxray_sleds_end2:
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start2:
++; CHECK-MACOS-LABEL: lxray_sleds_start2:
+ ; CHECK-MACOS:         .quad Lxray_sled_4
+ ; CHECK-MACOS:         .quad Lxray_sled_5
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end2:
+diff --git a/llvm/test/CodeGen/AArch64/xray-omit-function-index.ll b/llvm/test/CodeGen/AArch64/xray-omit-function-index.ll
+index 36faabe57ddc..54a45e03d0f0 100644
+--- a/llvm/test/CodeGen/AArch64/xray-omit-function-index.ll
++++ b/llvm/test/CodeGen/AArch64/xray-omit-function-index.ll
+@@ -32,7 +32,7 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-LABEL: Lxray_sleds_end0:
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS:         .quad Lxray_sled_1
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+diff --git a/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-entry.ll b/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-entry.ll
+index ed2d488ed010..97717d6e2fc8 100644
+--- a/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-entry.ll
++++ b/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-entry.ll
+@@ -23,6 +23,6 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-LABEL: Lxray_sleds_end0:
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+diff --git a/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-exit.ll b/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-exit.ll
+index 1908a4e3ab58..189be432a344 100644
+--- a/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-exit.ll
++++ b/llvm/test/CodeGen/AArch64/xray-partial-instrumentation-skip-exit.ll
+@@ -23,6 +23,6 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-LABEL: Lxray_sleds_end0:
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+diff --git a/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll b/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll
+index 0f20df2ba3ce..484dca11104a 100644
+--- a/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll
++++ b/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll
+@@ -29,7 +29,7 @@ define i32 @callee() nounwind noinline uwtable "function-instrument"="xray-alway
+ ; CHECK-LINUX-NEXT:    .xword 2
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS-NEXT:  [[TMP:Ltmp[0-9]+]]:
+ ; CHECK-MACOS:         .quad Lxray_sled_0-[[TMP]]
+ ; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
+@@ -37,7 +37,7 @@ define i32 @callee() nounwind noinline uwtable "function-instrument"="xray-alway
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start0-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start0-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 2
+ 
+ define i32 @caller() nounwind noinline uwtable "function-instrument"="xray-always" {
+@@ -68,11 +68,11 @@ define i32 @caller() nounwind noinline uwtable "function-instrument"="xray-alway
+ ; CHECK-LINUX-NEXT:    .xword 2
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start1:
++; CHECK-MACOS-LABEL: lxray_sleds_start1:
+ ; CHECK-MACOS:         .quad Lxray_sled_2
+ ; CHECK-MACOS:         .quad Lxray_sled_3
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end1:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start1-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start1-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 2
+diff --git a/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll b/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll
+index 0c7c8a2c5801..425ffc33bf81 100644
+--- a/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll
+@@ -34,10 +34,10 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-NEXT:    .long 2
+ 
+ ; CHECK-IOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-IOS-LABEL: Lxray_sleds_start0:
++; CHECK-IOS-LABEL: lxray_sleds_start0:
+ ; CHECK-IOS:         .long Lxray_sled_0
+ ; CHECK-IOS:         .long Lxray_sled_1
+ ; CHECK-IOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-IOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+-; CHECK-IOS:         .long Lxray_sleds_start0-lxray_fn_idx0
++; CHECK-IOS:         .long lxray_sleds_start0-lxray_fn_idx0
+ ; CHECK-IOS-NEXT:    .long 2
+diff --git a/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll b/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll
+index 27189dd45456..745a8562a8f2 100644
+--- a/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll
+@@ -25,11 +25,11 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-NEXT:    .long 2
+ 
+ ; CHECK-IOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-IOS-LABEL: Lxray_sleds_start0:
++; CHECK-IOS-LABEL: lxray_sleds_start0:
+ ; CHECK-IOS:         .long Lxray_sled_0
+ ; CHECK-IOS:         .long Lxray_sled_1
+ ; CHECK-IOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-IOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-IOS:       lxray_fn_idx0:
+-; CHECK-IOS:         .long Lxray_sleds_start0-lxray_fn_idx0
++; CHECK-IOS:         .long lxray_sleds_start0-lxray_fn_idx0
+ ; CHECK-IOS-NEXT:    .long 2
+diff --git a/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll
+index 00034414cfa8..9cebffc3abe9 100644
+--- a/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll
+@@ -25,13 +25,13 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-NEXT:    .quad 2
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS:         .quad Lxray_sled_1
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start0-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start0-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 2
+ 
+ 
+@@ -74,7 +74,7 @@ NotEqual:
+ ; CHECK-LINUX-NEXT:    .quad 3
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start1:
++; CHECK-MACOS-LABEL: lxray_sleds_start1:
+ ; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
+ ; CHECK-MACOS-NEXT:    .quad Lxray_sled_2-[[TMP]]
+ ; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
+@@ -84,5 +84,5 @@ NotEqual:
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end1:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start1-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start1-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 3
+diff --git a/llvm/test/CodeGen/X86/xray-log-args.ll b/llvm/test/CodeGen/X86/xray-log-args.ll
+index 2212c3fd9e9c..240a6392f276 100644
+--- a/llvm/test/CodeGen/X86/xray-log-args.ll
++++ b/llvm/test/CodeGen/X86/xray-log-args.ll
+@@ -25,7 +25,7 @@ define i32 @callee(i32 %arg) nounwind noinline uwtable "function-instrument"="xr
+ ; CHECK-LINUX-NEXT:    .byte 0x02
+ ; CHECK-LINUX:         .zero 13
+ 
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS-NEXT:  [[TMP:Ltmp[0-9]+]]:
+ ; CHECK-MACOS-NEXT:    .quad Lxray_sled_0-[[TMP]]
+ ; CHECK-MACOS-NEXT:    .quad Lfunc_begin0-([[TMP]]+8)
+@@ -62,7 +62,7 @@ define i32 @caller(i32 %arg) nounwind noinline uwtable "function-instrument"="xr
+ ; CHECK-LINUX-NEXT:    .byte 0x02
+ ; CHECK-LINUX:         .zero 13
+ 
+-; CHECK-MACOS-LABEL: Lxray_sleds_start1:
++; CHECK-MACOS-LABEL: lxray_sleds_start1:
+ ; CHECK-MACOS-NEXT:  [[TMP:Ltmp[0-9]+]]:
+ ; CHECK-MACOS-NEXT:    .quad Lxray_sled_2-[[TMP]]
+ ; CHECK-MACOS-NEXT:    .quad Lfunc_begin1-([[TMP]]+8)
+diff --git a/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-entry.ll b/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-entry.ll
+index f345611492a6..f58d743d465d 100644
+--- a/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-entry.ll
++++ b/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-entry.ll
+@@ -21,12 +21,12 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX-NEXT:    .quad 1
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start0-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start0-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 1
+ 
+ 
+@@ -62,11 +62,11 @@ NotEqual:
+ ; CHECK-LINUX-NEXT:    .quad 2
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start1:
++; CHECK-MACOS-LABEL: lxray_sleds_start1:
+ ; CHECK-MACOS:         .quad Lxray_sled_1
+ ; CHECK-MACOS:         .quad Lxray_sled_2
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end1:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start1-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start1-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 2
+diff --git a/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-exit.ll b/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-exit.ll
+index fa3b97e89299..3d631d73b68c 100644
+--- a/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-exit.ll
++++ b/llvm/test/CodeGen/X86/xray-partial-instrumentation-skip-exit.ll
+@@ -18,15 +18,17 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LINUX:         .quad .Lxray_sled_0
+ ; CHECK-LINUX-LABEL: .Lxray_sleds_end0:
+ ; CHECK-LINUX-LABEL: .section xray_fn_idx,"awo",@progbits,foo{{$}}
+-; CHECK-LINUX:         .quad .Lxray_sleds_start0
++; CHECK-LINUX:       [[IDX:.lxray_fn_idx[0-9]+]]:
++; CHECK-LINUX:         .quad .Lxray_sleds_start0-[[IDX]]
+ ; CHECK-LINUX-NEXT:    .quad .Lxray_sleds_end0
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+-; CHECK-MACOS:         .quad Lxray_sleds_start0
++; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
++; CHECK-MACOS:         .quad lxray_sleds_start0-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad Lxray_sleds_end0
+ 
+ 
+@@ -57,13 +59,13 @@ NotEqual:
+ ; CHECK-LINUX-LABEL: .section xray_fn_idx,"awo",@progbits,bar{[$}}
+ ; CHECK-LINUX:       .Lxray_fn_idx0:
+ ; CHECK-LINUX-NEXT:    .quad .Lxray_sleds_start1-.Lxray_fn_idx0
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sleds_end1
++; CHECK-LINUX-NEXT:    .quad 2
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start1:
++; CHECK-MACOS-LABEL: lxray_sleds_start1:
+ ; CHECK-MACOS:         .quad Lxray_sled_1
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end1:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       Lxray_fn_idx0:
+ ; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start1-Lxray_fn_idx0
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_end1
++; CHECK-MACOS-NEXT:    .quad 2
+diff --git a/llvm/test/CodeGen/X86/xray-tail-call-sled.ll b/llvm/test/CodeGen/X86/xray-tail-call-sled.ll
+index d1f85529dd95..4d0c359f0dc3 100644
+--- a/llvm/test/CodeGen/X86/xray-tail-call-sled.ll
++++ b/llvm/test/CodeGen/X86/xray-tail-call-sled.ll
+@@ -24,13 +24,13 @@ define dso_local i32 @callee() nounwind noinline uwtable "function-instrument"="
+ ; CHECK-LINUX-NEXT:    .quad 2
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start0:
++; CHECK-MACOS-LABEL: lxray_sleds_start0:
+ ; CHECK-MACOS:         .quad Lxray_sled_0
+ ; CHECK-MACOS:         .quad Lxray_sled_1
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start0-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start0-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 2
+ 
+ define dso_local i32 @caller() nounwind noinline uwtable "function-instrument"="xray-always" {
+@@ -58,11 +58,11 @@ define dso_local i32 @caller() nounwind noinline uwtable "function-instrument"="
+ ; CHECK-LINUX-NEXT:    .quad 2
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map,regular,live_support{{$}}
+-; CHECK-MACOS-LABEL: Lxray_sleds_start1:
++; CHECK-MACOS-LABEL: lxray_sleds_start1:
+ ; CHECK-MACOS:         .quad Lxray_sled_2
+ ; CHECK-MACOS:         .quad Lxray_sled_3
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end1:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx,regular,live_support{{$}}
+ ; CHECK-MACOS:       [[IDX:lxray_fn_idx[0-9]+]]:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sleds_start1-[[IDX]]
++; CHECK-MACOS-NEXT:    .quad lxray_sleds_start1-[[IDX]]
+ ; CHECK-MACOS-NEXT:    .quad 2
+-- 
+2.39.3
+

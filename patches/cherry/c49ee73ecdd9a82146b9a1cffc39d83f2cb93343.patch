@@ -1,0 +1,150 @@
+From c49ee73ecdd9a82146b9a1cffc39d83f2cb93343 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Mon, 25 Jan 2021 00:26:54 -0800
+Subject: [PATCH] [XRay] Make __xray_customevent support non-Linux
+
+---
+ .../SelectionDAG/SelectionDAGBuilder.cpp      |  4 +-
+ llvm/test/CodeGen/X86/xray-custom-log.ll      | 48 +++++++++++++++++--
+ llvm/test/CodeGen/X86/xray-typed-event-log.ll | 45 -----------------
+ 3 files changed, 46 insertions(+), 51 deletions(-)
+ delete mode 100644 llvm/test/CodeGen/X86/xray-typed-event-log.ll
+
+diff --git a/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp b/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
+index 20e13b361cf8..0a1489c58951 100644
+--- a/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
++++ b/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
+@@ -6782,7 +6782,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
+     // specific calling convention, and only for x86_64.
+     // FIXME: Support other platforms later.
+     const auto &Triple = DAG.getTarget().getTargetTriple();
+-    if (Triple.getArch() != Triple::x86_64 || !Triple.isOSLinux())
++    if (Triple.getArch() != Triple::x86_64)
+       return;
+ 
+     SDLoc DL = getCurSDLoc();
+@@ -6813,7 +6813,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
+     // specific calling convention, and only for x86_64.
+     // FIXME: Support other platforms later.
+     const auto &Triple = DAG.getTarget().getTargetTriple();
+-    if (Triple.getArch() != Triple::x86_64 || !Triple.isOSLinux())
++    if (Triple.getArch() != Triple::x86_64)
+       return;
+ 
+     SDLoc DL = getCurSDLoc();
+diff --git a/llvm/test/CodeGen/X86/xray-custom-log.ll b/llvm/test/CodeGen/X86/xray-custom-log.ll
+index f53e6c676c3b..ee293112249b 100644
+--- a/llvm/test/CodeGen/X86/xray-custom-log.ll
++++ b/llvm/test/CodeGen/X86/xray-custom-log.ll
+@@ -1,8 +1,7 @@
+-; RUN: llc -verify-machineinstrs -debug-entry-values -filetype=asm -o - -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s
+-; RUN: llc -verify-machineinstrs -debug-entry-values -filetype=asm -o - \
+-; RUN:     -mtriple=x86_64-unknown-linux-gnu -relocation-model=pic < %s | FileCheck %s -check-prefix=PIC
++; RUN: llc -verify-machineinstrs -mtriple=x86_64 < %s | FileCheck %s
++; RUN: llc -verify-machineinstrs -mtriple=x86_64 -relocation-model=pic < %s | FileCheck %s --check-prefix=PIC
+ 
+-define i32 @fn() nounwind noinline uwtable "function-instrument"="xray-always" {
++define i32 @customevent() nounwind "function-instrument"="xray-always" {
+     %eventptr = alloca i8
+     %eventsize = alloca i32
+     store i32 3, i32* %eventsize
+@@ -33,4 +32,45 @@ define i32 @fn() nounwind noinline uwtable "function-instrument"="xray-always" {
+ ; CHECK-LABEL: Lxray_sleds_start0:
+ ; CHECK:       .quad {{.*}}xray_event_sled_0
+ 
++define i32 @typedevent() nounwind "function-instrument"="xray-always" {
++    %eventptr = alloca i8
++    %eventsize = alloca i32
++    %eventtype = alloca i16
++    store i16 6, i16* %eventtype
++    %type = load i16, i16* %eventtype
++    store i32 3, i32* %eventsize
++    %val = load i32, i32* %eventsize
++    call void @llvm.xray.typedevent(i16 %type, i8* %eventptr, i32 %val)
++    ; CHECK-LABEL: Lxray_typed_event_sled_0:
++    ; CHECK:       .byte 0xeb, 0x14
++    ; CHECK-NEXT:  pushq %rdi
++    ; CHECK-NEXT:  pushq %rsi
++    ; CHECK-NEXT:  pushq %rdx
++    ; CHECK-NEXT:  movq %rdx, %rdi
++    ; CHECK-NEXT:  movq %rcx, %rsi
++    ; CHECK-NEXT:  movq %rax, %rdx
++    ; CHECK-NEXT:  callq __xray_TypedEvent
++    ; CHECK-NEXT:  popq %rdx
++    ; CHECK-NEXT:  popq %rsi
++    ; CHECK-NEXT:  popq %rdi
++
++    ; PIC-LABEL: Lxray_typed_event_sled_0:
++    ; PIC:       .byte 0xeb, 0x14
++    ; PIC-NEXT:  pushq %rdi
++    ; PIC-NEXT:  pushq %rsi
++    ; PIC-NEXT:  pushq %rdx
++    ; PIC-NEXT:  movq %rdx, %rdi
++    ; PIC-NEXT:  movq %rcx, %rsi
++    ; PIC-NEXT:  movq %rax, %rdx
++    ; PIC-NEXT:  callq __xray_TypedEvent@PLT
++    ; PIC-NEXT:  popq %rdx
++    ; PIC-NEXT:  popq %rsi
++    ; PIC-NEXT:  popq %rdi
++    ret i32 0
++}
++; CHECK-LABEL: xray_instr_map
++; CHECK-LABEL: Lxray_sleds_start1:
++; CHECK:       .quad {{.*}}xray_typed_event_sled_0
++
+ declare void @llvm.xray.customevent(i8*, i32)
++declare void @llvm.xray.typedevent(i16, i8*, i32)
+diff --git a/llvm/test/CodeGen/X86/xray-typed-event-log.ll b/llvm/test/CodeGen/X86/xray-typed-event-log.ll
+deleted file mode 100644
+index aa7e19947f95..000000000000
+--- a/llvm/test/CodeGen/X86/xray-typed-event-log.ll
++++ /dev/null
+@@ -1,45 +0,0 @@
+-; RUN: llc -verify-machineinstrs -debug-entry-values -filetype=asm -o - -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s
+-; RUN: llc -verify-machineinstrs -debug-entry-values -filetype=asm -o - -mtriple=x86_64-unknown-linux-gnu \
+-; RUN:    -relocation-model=pic < %s | FileCheck %s -check-prefix=PIC
+-
+-define i32 @fn() nounwind noinline uwtable "function-instrument"="xray-always" {
+-    %eventptr = alloca i8
+-    %eventsize = alloca i32
+-    %eventtype = alloca i16
+-    store i16 6, i16* %eventtype
+-    %type = load i16, i16* %eventtype
+-    store i32 3, i32* %eventsize
+-    %val = load i32, i32* %eventsize
+-    call void @llvm.xray.typedevent(i16 %type, i8* %eventptr, i32 %val)
+-    ; CHECK-LABEL: Lxray_typed_event_sled_0:
+-    ; CHECK:       .byte 0xeb, 0x14
+-    ; CHECK-NEXT:  pushq %rdi
+-    ; CHECK-NEXT:  pushq %rsi
+-    ; CHECK-NEXT:  pushq %rdx
+-    ; CHECK-NEXT:  movq %rdx, %rdi
+-    ; CHECK-NEXT:  movq %rcx, %rsi
+-    ; CHECK-NEXT:  movq %rax, %rdx
+-    ; CHECK-NEXT:  callq __xray_TypedEvent
+-    ; CHECK-NEXT:  popq %rdx
+-    ; CHECK-NEXT:  popq %rsi
+-    ; CHECK-NEXT:  popq %rdi
+-
+-    ; PIC-LABEL: Lxray_typed_event_sled_0:
+-    ; PIC:       .byte 0xeb, 0x14
+-    ; PIC-NEXT:  pushq %rdi
+-    ; PIC-NEXT:  pushq %rsi
+-    ; PIC-NEXT:  pushq %rdx
+-    ; PIC-NEXT:  movq %rdx, %rdi
+-    ; PIC-NEXT:  movq %rcx, %rsi
+-    ; PIC-NEXT:  movq %rax, %rdx
+-    ; PIC-NEXT:  callq __xray_TypedEvent@PLT
+-    ; PIC-NEXT:  popq %rdx
+-    ; PIC-NEXT:  popq %rsi
+-    ; PIC-NEXT:  popq %rdi
+-    ret i32 0
+-}
+-; CHECK-LABEL: xray_instr_map
+-; CHECK-LABEL: Lxray_sleds_start0:
+-; CHECK:       .quad {{.*}}xray_typed_event_sled_0
+-
+-declare void @llvm.xray.typedevent(i16, i8*, i32)
+-- 
+2.39.3
+

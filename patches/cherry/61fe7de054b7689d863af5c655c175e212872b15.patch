@@ -1,0 +1,57 @@
+From 61fe7de054b7689d863af5c655c175e212872b15 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Wed, 28 Dec 2022 12:03:09 -0800
+Subject: [PATCH] [XRay] Fix Hexagon sled version
+
+D113638 emitted version 0 for XRaySledEntry, which will lead to an incorrect
+address computation in the runtime.
+
+While here, improve the test.
+---
+ llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp |  2 +-
+ llvm/test/CodeGen/Hexagon/xray.ll             | 17 +++++++++++------
+ 2 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp b/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp
+index fba35db31a37..319279abd541 100644
+--- a/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp
++++ b/llvm/lib/Target/Hexagon/HexagonAsmPrinter.cpp
+@@ -817,7 +817,7 @@ void HexagonAsmPrinter::EmitSled(const MachineInstr &MI, SledKind Kind) {
+   emitNops(NoopsInSledCount);
+ 
+   OutStreamer->emitLabel(PostSled);
+-  recordSled(CurSled, MI, Kind, 0);
++  recordSled(CurSled, MI, Kind, 2);
+ }
+ 
+ void HexagonAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI) {
+diff --git a/llvm/test/CodeGen/Hexagon/xray.ll b/llvm/test/CodeGen/Hexagon/xray.ll
+index b9b25b80ef00..8f1d9b3c6da1 100644
+--- a/llvm/test/CodeGen/Hexagon/xray.ll
++++ b/llvm/test/CodeGen/Hexagon/xray.ll
+@@ -19,11 +19,16 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LABEL: .Ltmp1:
+ ; CHECK:       jumpr r31
+ }
+-; CHECK-LABEL: xray_instr_map
+-; CHECK-LABEL: .Lxray_sleds_start0:
+-; CHECK:       .word {{.*}}Lxray_sled_0
+-; CHECK:       .word {{.*}}Lxray_sled_1
++; CHECK:       .section xray_instr_map,"ao",@progbits,foo
++; CHECK-NEXT:  .Lxray_sleds_start0:
++; CHECK-NEXT:  .Ltmp2:
++; CHECK-NEXT:  .word .Lxray_sled_0-.Ltmp2
++; CHECK-NEXT:  .word .Lfunc_begin0-(.Ltmp2+4)
++; CHECK-NEXT:  .byte 0x00
++; CHECK-NEXT:  .byte 0x01
++; CHECK-NEXT:  .byte 0x02
++; CHECK-NEXT:  .space 5
+ ; CHECK-LABEL: .Lxray_sleds_end0:
+ ; CHECK-LABEL: xray_fn_idx
+-; CHECK:       .word {{.*}}Lxray_sleds_start0
+-; CHECK-NEXT:  .word {{.*}}Lxray_sleds_end0
++; CHECK:       .word .Lxray_sleds_start0{{$}}
++; CHECK-NEXT:  .word .Lxray_sleds_end0{{$}}
+-- 
+2.39.3
+

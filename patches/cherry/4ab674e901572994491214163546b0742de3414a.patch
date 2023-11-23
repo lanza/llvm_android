@@ -1,0 +1,774 @@
+From 4ab674e901572994491214163546b0742de3414a Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Sun, 18 Jun 2023 13:32:40 -0700
+Subject: [PATCH] [XRay][test] Make tests less sensitive to .Ltmp/Ltmp label
+ changes
+
+---
+ .../AArch64/xray-attribute-instrumentation.ll | 60 ++++---------------
+ .../CodeGen/AArch64/xray-tail-call-sled.ll    | 56 +++++------------
+ .../xray-armv6-attribute-instrumentation.ll   |  4 +-
+ .../xray-armv7-attribute-instrumentation.ll   | 18 ++----
+ llvm/test/CodeGen/ARM/xray-tail-call-sled.ll  | 36 +++--------
+ llvm/test/CodeGen/Hexagon/xray.ll             | 16 ++---
+ .../xray-mips-attribute-instrumentation.ll    | 55 ++++++++---------
+ .../PowerPC/xray-attribute-instrumentation.ll | 22 +++----
+ .../CodeGen/PowerPC/xray-tail-call-hidden.ll  | 13 ++--
+ .../CodeGen/PowerPC/xray-tail-call-sled.ll    | 20 ++++---
+ .../X86/xray-attribute-instrumentation.ll     | 24 ++++----
+ llvm/test/CodeGen/X86/xray-log-args.ll        | 48 +++++++--------
+ 12 files changed, 141 insertions(+), 231 deletions(-)
+
+diff --git a/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
+index 1835b3c2e87a..6c269869f11c 100644
+--- a/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/AArch64/xray-attribute-instrumentation.ll
+@@ -5,25 +5,13 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-LABEL: foo:
+ ; CHECK-LABEL: Lxray_sled_0:
+ ; CHECK-NEXT:  b  #32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp0:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   ret i32 0
+ ; CHECK-LABEL: Lxray_sled_1:
+ ; CHECK-NEXT:  b  #32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp1:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK-NEXT:  ret
+ }
+ 
+@@ -43,25 +31,13 @@ define i32 @bar() nounwind noinline uwtable "function-instrument"="xray-never" "
+ ; CHECK-LABEL: bar:
+ ; CHECK-LABEL: Lxray_sled_2:
+ ; CHECK-NEXT:  b  #32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp4:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   ret i32 0
+ ; CHECK-LABEL: Lxray_sled_3:
+ ; CHECK-NEXT:  b  #32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp5:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK-NEXT:  ret
+ }
+ 
+@@ -81,25 +57,13 @@ define i32 @instrumented() nounwind noinline uwtable "xray-instruction-threshold
+ ; CHECK-LABEL: instrumented:
+ ; CHECK-LABEL: Lxray_sled_4:
+ ; CHECK-NEXT:  b  #32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp8:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   ret i32 0
+ ; CHECK-LABEL: Lxray_sled_5:
+ ; CHECK-NEXT:  b  #32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp9:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK-NEXT:  ret
+ }
+ 
+diff --git a/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll b/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll
+index d81496ce667f..67de3246c035 100644
+--- a/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll
++++ b/llvm/test/CodeGen/AArch64/xray-tail-call-sled.ll
+@@ -5,36 +5,24 @@ define i32 @callee() nounwind noinline uwtable "function-instrument"="xray-alway
+ ; CHECK:       .p2align	2
+ ; CHECK-LABEL: Lxray_sled_0:
+ ; CHECK-NEXT:  b	#32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp0:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   ret i32 0
+ ; CHECK-NEXT:  mov	w0, wzr
+ ; CHECK-NEXT:  .p2align	2
+ ; CHECK-LABEL: Lxray_sled_1:
+ ; CHECK-NEXT:  b	#32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp1:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK-NEXT:  ret
+ }
+ 
+ ; CHECK-LINUX-LABEL: .section xray_instr_map,"ao",@progbits,callee{{$}}
+ ; CHECK-LINUX-LABEL: .Lxray_sleds_start0:
+-; CHECK-LINUX-NEXT:  .Ltmp2:
+-; CHECK-LINUX:         .xword .Lxray_sled_0-.Ltmp2
+-; CHECK-LINUX:       .Ltmp3:
+-; CHECK-LINUX-NEXT:    .xword .Lxray_sled_1-.Ltmp3
++; CHECK-LINUX-NEXT:  [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX:         .xword .Lxray_sled_0-[[TMP]]
++; CHECK-LINUX:       [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .xword .Lxray_sled_1-[[TMP]]
+ ; CHECK-LINUX-LABEL: Lxray_sleds_end0:
+ ; CHECK-LINUX-LABEL: .section xray_fn_idx,"awo",@progbits,callee{{$}}
+ ; CHECK-LINUX:         .xword .Lxray_sleds_start0
+@@ -42,10 +30,10 @@ define i32 @callee() nounwind noinline uwtable "function-instrument"="xray-alway
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map{{$}}
+ ; CHECK-MACOS-LABEL: Lxray_sleds_start0:
+-; CHECK-MACOS-NEXT:  Ltmp2:
+-; CHECK-MACOS:         .quad Lxray_sled_0-Ltmp2
+-; CHECK-MACOS:       Ltmp3:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_1-Ltmp3
++; CHECK-MACOS-NEXT:  [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS:         .quad Lxray_sled_0-[[TMP]]
++; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_1-[[TMP]]
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end0:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx{{$}}
+ ; CHECK-MACOS:         .quad Lxray_sleds_start0
+@@ -55,25 +43,13 @@ define i32 @caller() nounwind noinline uwtable "function-instrument"="xray-alway
+ ; CHECK:       .p2align	2
+ ; CHECK-LABEL: Lxray_sled_2:
+ ; CHECK-NEXT:  b	#32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp4:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK:       .p2align	2
+ ; CHECK-LABEL: Lxray_sled_3:
+ ; CHECK-NEXT:  b	#32
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp5:
++; CHECK-COUNT-7:  nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   %retval = tail call i32 @callee()
+ ; CHECK-LINUX: b	callee
+ ; CHECK-MACOS: b	_callee
+diff --git a/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll b/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll
+index ef81971c249c..b37b22b5c359 100644
+--- a/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/ARM/xray-armv6-attribute-instrumentation.ll
+@@ -10,7 +10,7 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-NEXT:  mov	r0, r0
+ ; CHECK-NEXT:  mov	r0, r0
+ ; CHECK-NEXT:  mov	r0, r0
+-; CHECK-LABEL: Ltmp0:
++; CHECK-NEXT:  Ltmp[[#]]:
+   ret i32 0
+ ; CHECK-LABEL: Lxray_sled_1:
+ ; CHECK-NEXT:  b  #20
+@@ -20,7 +20,7 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-NEXT:  mov	r0, r0
+ ; CHECK-NEXT:  mov	r0, r0
+ ; CHECK-NEXT:  mov	r0, r0
+-; CHECK-LABEL: Ltmp1:
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK-NEXT:  bx	lr
+ }
+ 
+diff --git a/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll b/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll
+index 2acf066a6f96..c3be28828be2 100644
+--- a/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/ARM/xray-armv7-attribute-instrumentation.ll
+@@ -4,23 +4,13 @@
+ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always" {
+ ; CHECK-LABEL: Lxray_sled_0:
+ ; CHECK-NEXT:  b  #20
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp0:
++; CHECK-COUNT-6: nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   ret i32 0
+ ; CHECK-LABEL: Lxray_sled_1:
+ ; CHECK-NEXT:  b  #20
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp1:
++; CHECK-COUNT-6: nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK-NEXT:  bx lr
+ }
+ 
+diff --git a/llvm/test/CodeGen/ARM/xray-tail-call-sled.ll b/llvm/test/CodeGen/ARM/xray-tail-call-sled.ll
+index 93b9e2f3387a..c60190e20d97 100644
+--- a/llvm/test/CodeGen/ARM/xray-tail-call-sled.ll
++++ b/llvm/test/CodeGen/ARM/xray-tail-call-sled.ll
+@@ -5,25 +5,15 @@ define i32 @callee() nounwind noinline uwtable "function-instrument"="xray-alway
+ ; CHECK:       .p2align	2
+ ; CHECK-LABEL: Lxray_sled_0:
+ ; CHECK-NEXT:  b	#20
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp0:
++; CHECK-COUNT-6: nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   ret i32 0
+ ; CHECK-NEXT:  mov	r0, #0
+ ; CHECK-NEXT:  .p2align	2
+ ; CHECK-LABEL: Lxray_sled_1:
+ ; CHECK-NEXT:  b	#20
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp1:
++; CHECK-COUNT-6: nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK-NEXT:  bx	lr
+ }
+ 
+@@ -31,23 +21,13 @@ define i32 @caller() nounwind noinline uwtable "function-instrument"="xray-alway
+ ; CHECK:       .p2align	2
+ ; CHECK-LABEL: Lxray_sled_2:
+ ; CHECK-NEXT:  b	#20
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp4:
++; CHECK-COUNT-6: nop
++; CHECK-NEXT:  Ltmp[[#]]:
+ ; CHECK:       .p2align	2
+ ; CHECK-LABEL: Lxray_sled_3:
+ ; CHECK-NEXT:  b	#20
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-NEXT:  nop
+-; CHECK-LABEL: Ltmp5:
++; CHECK-COUNT-6: nop
++; CHECK-NEXT:  Ltmp[[#]]:
+   %retval = tail call i32 @callee()
+ ; CHECK:       b	{{.*}}callee
+   ret i32 %retval
+diff --git a/llvm/test/CodeGen/Hexagon/xray.ll b/llvm/test/CodeGen/Hexagon/xray.ll
+index 8f1d9b3c6da1..388a21c76c56 100644
+--- a/llvm/test/CodeGen/Hexagon/xray.ll
++++ b/llvm/test/CodeGen/Hexagon/xray.ll
+@@ -3,27 +3,29 @@
+ 
+ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always" {
+ ; CHECK-LABEL: .Lxray_sled_0:
+-; CHECK:       jump .Ltmp0
++; CHECK:       jump .Ltmp[[#l:]]
+ ; CHECK:         nop
+ ; CHECK:         nop
+ ; CHECK:         nop
+ ; CHECK:         nop
+-; CHECK-LABEL: .Ltmp0:
++; CHECK:       .Ltmp
++; CHECK-SAME:  [[#l]]:
+   ret i32 0
+ ; CHECK-LABEL: .Lxray_sled_1:
+-; CHECK:       jump .Ltmp1
++; CHECK:       jump .Ltmp[[#l:]]
+ ; CHECK:         nop
+ ; CHECK:         nop
+ ; CHECK:         nop
+ ; CHECK:         nop
+-; CHECK-LABEL: .Ltmp1:
++; CHECK:       .Ltmp
++; CHECK-SAME:  [[#l]]:
+ ; CHECK:       jumpr r31
+ }
+ ; CHECK:       .section xray_instr_map,"ao",@progbits,foo
+ ; CHECK-NEXT:  .Lxray_sleds_start0:
+-; CHECK-NEXT:  .Ltmp2:
+-; CHECK-NEXT:  .word .Lxray_sled_0-.Ltmp2
+-; CHECK-NEXT:  .word .Lfunc_begin0-(.Ltmp2+4)
++; CHECK-NEXT:  [[TMP:.Ltmp[0-9]+]]:
++; CHECK-NEXT:  .word .Lxray_sled_0-[[TMP]]
++; CHECK-NEXT:  .word .Lfunc_begin0-([[TMP]]+4)
+ ; CHECK-NEXT:  .byte 0x00
+ ; CHECK-NEXT:  .byte 0x01
+ ; CHECK-NEXT:  .byte 0x02
+diff --git a/llvm/test/CodeGen/Mips/xray-mips-attribute-instrumentation.ll b/llvm/test/CodeGen/Mips/xray-mips-attribute-instrumentation.ll
+index ae542146a799..f49ee02eb6b7 100644
+--- a/llvm/test/CodeGen/Mips/xray-mips-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/Mips/xray-mips-attribute-instrumentation.ll
+@@ -7,8 +7,7 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK:       .p2align 2
+ ; CHECK-MIPS64-LABEL: .Lxray_sled_0:
+ ; CHECK-MIPS32-LABEL: $xray_sled_0:
+-; CHECK-MIPS64:  b .Ltmp1
+-; CHECK-MIPS32:  b $tmp1
++; CHECK-NEXT:  b [[TMP:(\.L|\$)tmp[0-9]+]]
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+@@ -24,15 +23,13 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+-; CHECK-MIPS64-LABEL: .Ltmp1:
+-; CHECK-MIPS32-LABEL: $tmp1:
+-; CHECK-MIPS32:  addiu $25, $25, 52
++; CHECK-NEXT:  [[TMP]]:
++; CHECK-MIPS32-NEXT:  addiu $25, $25, 52
+   ret i32 0
+ ; CHECK:       .p2align 2
+ ; CHECK-MIPS64-LABEL: .Lxray_sled_1:
+-; CHECK-MIPS64-NEXT:   b .Ltmp2
+ ; CHECK-MIPS32-LABEL: $xray_sled_1:
+-; CHECK-MIPS32-NEXT:   b $tmp2
++; CHECK-NEXT:  b [[TMP:(\.L|\$)tmp[0-9]+]]
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+@@ -48,26 +45,24 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+-; CHECK-MIPS64-LABEL: .Ltmp2:
+-; CHECK-MIPS32-LABEL: $tmp2:
++; CHECK:       [[TMP]]:
+ ; CHECK-MIPS32:  addiu $25, $25, 52
+ }
+ ; CHECK:             .section xray_instr_map,"ao",@progbits,foo
+-; CHECK-MIPS64:      .Ltmp3:
+-; CHECK-MIPS64-NEXT:   .8byte  .Lxray_sled_0-.Ltmp3
+-; CHECK-MIPS64-NEXT:   .8byte  .Lfunc_begin0-(.Ltmp3+8)
+-; CHECK-MIPS32:      $tmp3:
+-; CHECK-MIPS32-NEXT:   .4byte  ($xray_sled_0)-($tmp3)
+-; CHECK-MIPS32-NEXT:   .4byte  ($func_begin0)-(($tmp3)+4)
++; CHECK-MIPS64:      [[TMP:.Ltmp[0-9]+]]:
++; CHECK-MIPS64-NEXT:   .8byte  .Lxray_sled_0-[[TMP]]
++; CHECK-MIPS64-NEXT:   .8byte  .Lfunc_begin0-([[TMP]]+8)
++; CHECK-MIPS32:      [[TMP:\$tmp[0-9]+]]:
++; CHECK-MIPS32-NEXT:   .4byte  ($xray_sled_0)-([[TMP]])
++; CHECK-MIPS32-NEXT:   .4byte  ($func_begin0)-(([[TMP]])+4)
+ 
+ ; We test multiple returns in a single function to make sure we're getting all
+ ; of them with XRay instrumentation.
+ define i32 @bar(i32 %i) nounwind noinline uwtable "function-instrument"="xray-always" {
+ ; CHECK:       .p2align 2
+ ; CHECK-MIPS64-LABEL: .Lxray_sled_2:
+-; CHECK-MIPS64-NEXT:   b .Ltmp6
+ ; CHECK-MIPS32-LABEL: $xray_sled_2:
+-; CHECK-MIPS32-NEXT:   b $tmp6
++; CHECK-NEXT:  b [[TMP:(\.L|\$)tmp[0-9]+]]
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+@@ -83,8 +78,7 @@ define i32 @bar(i32 %i) nounwind noinline uwtable "function-instrument"="xray-al
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+-; CHECK-MIPS64-LABEL: .Ltmp6:
+-; CHECK-MIPS32-LABEL: $tmp6:
++; CHECK:       [[TMP]]:
+ ; CHECK-MIPS32:  addiu $25, $25, 52
+ Test:
+   %cond = icmp eq i32 %i, 0
+@@ -93,9 +87,8 @@ IsEqual:
+   ret i32 0
+ ; CHECK:       .p2align 2
+ ; CHECK-MIPS64-LABEL: .Lxray_sled_3:
+-; CHECK-MIPS64-NEXT:   b .Ltmp7
+ ; CHECK-MIPS32-LABEL: $xray_sled_3:
+-; CHECK-MIPS32-NEXT:   b $tmp7
++; CHECK-NEXT:  b [[TMP:(\.L|\$)tmp[0-9]+]]
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+@@ -111,16 +104,14 @@ IsEqual:
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+-; CHECK-MIPS64-LABEL: .Ltmp7:
+-; CHECK-MIPS32-LABEL: $tmp7:
++; CHECK-NEXT:    [[TMP]]:
+ ; CHECK-MIPS32:  addiu $25, $25, 52 
+ NotEqual:
+   ret i32 1
+ ; CHECK:       .p2align 2
+ ; CHECK-MIPS64-LABEL: .Lxray_sled_4:
+-; CHECK-MIPS64-NEXT:   b .Ltmp8
+ ; CHECK-MIPS32-LABEL: $xray_sled_4:
+-; CHECK-MIPS32-NEXT:   b $tmp8
++; CHECK-NEXT:  b [[TMP:(\.L|\$)tmp[0-9]+]]
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+ ; CHECK-NEXT:  nop
+@@ -136,14 +127,16 @@ NotEqual:
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+ ; CHECK-MIPS64:  nop
+-; CHECK-MIPS64-LABEL: .Ltmp8:
+-; CHECK-MIPS32-LABEL: $tmp8:
++; CHECK-NEXT:    [[TMP]]:
+ ; CHECK-MIPS32:  addiu $25, $25, 52
+ }
+-; CHECK: .section xray_instr_map,{{.*}}
++; CHECK: .section xray_instr_map,"ao",@progbits,bar
+ ; CHECK-MIPS64: .8byte  .Lxray_sled_2
+ ; CHECK-MIPS64: .8byte  .Lxray_sled_3
+ ; CHECK-MIPS64: .8byte  .Lxray_sled_4
+-; CHECK-MIPS32: .4byte	($xray_sled_2)-($tmp9)
+-; CHECK-MIPS32: .4byte	($xray_sled_3)-($tmp10)
+-; CHECK-MIPS32: .4byte	($xray_sled_4)-($tmp11)
++; CHECK-MIPS32:      [[TMP:\$tmp[0-9]+]]:
++; CHECK-MIPS32-NEXT: .4byte	($xray_sled_2)-([[TMP]])
++; CHECK-MIPS32:      [[TMP:\$tmp[0-9]+]]:
++; CHECK-MIPS32-NEXT: .4byte	($xray_sled_3)-([[TMP]])
++; CHECK-MIPS32:      [[TMP:\$tmp[0-9]+]]:
++; CHECK-MIPS32-NEXT: .4byte	($xray_sled_4)-([[TMP]])
+diff --git a/llvm/test/CodeGen/PowerPC/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/PowerPC/xray-attribute-instrumentation.ll
+index fcebe3775312..a9cf117f2801 100644
+--- a/llvm/test/CodeGen/PowerPC/xray-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/PowerPC/xray-attribute-instrumentation.ll
+@@ -4,18 +4,18 @@
+ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always" {
+ ; CHECK-LABEL: foo:
+ ; CHECK-NEXT:  .Lfunc_begin0:
+-; CHECK-LABEL: .Ltmp0:
+-; CHECK:              b .Ltmp1
++; CHECK:       .Ltmp[[#l:]]:
++; CHECK-NEXT:         b .Ltmp[[#l+1]]
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         std 0, -8(1)
+ ; CHECK-NEXT:         mflr 0
+ ; CHECK-NEXT:         bl __xray_FunctionEntry
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         mtlr 0
+-; CHECK-LABEL: .Ltmp1:
++; CHECK-NEXT:  .Ltmp[[#l+1]]:
+   ret i32 0
+-; CHECK-LABEL: .Ltmp2:
+-; CHECK:              blr
++; CHECK:       .Ltmp[[#l+2]]:
++; CHECK-NEXT:         blr
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         std 0, -8(1)
+ ; CHECK-NEXT:         mflr 0
+@@ -25,16 +25,16 @@ define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always"
+ }
+ ; CHECK-LABEL: xray_instr_map,"ao",@progbits,foo{{$}}
+ ; CHECK:      .Lxray_sleds_start0:
+-; CHECK-NEXT: .Ltmp3:
+-; CHECK-NEXT:         .quad   .Ltmp0-.Ltmp3
+-; CHECK-NEXT:         .quad   .Lfunc_begin0-(.Ltmp3+8)
++; CHECK-NEXT: [[TMP:.Ltmp[0-9]+]]:
++; CHECK-NEXT:         .quad   .Ltmp[[#l]]-[[TMP]]
++; CHECK-NEXT:         .quad   .Lfunc_begin0-([[TMP]]+8)
+ ; CHECK-NEXT:         .byte   0x00
+ ; CHECK-NEXT:         .byte   0x01
+ ; CHECK-NEXT:         .byte   0x02
+ ; CHECK-NEXT:         .space  13
+-; CHECK-NEXT: .Ltmp4:
+-; CHECK-NEXT:         .quad   .Ltmp2-.Ltmp4
+-; CHECK-NEXT:         .quad   .Lfunc_begin0-(.Ltmp4+8)
++; CHECK-NEXT: [[TMP:.Ltmp[0-9]+]]:
++; CHECK-NEXT:         .quad   .Ltmp[[#l+2]]-[[TMP]]
++; CHECK-NEXT:         .quad   .Lfunc_begin0-([[TMP]]+8)
+ ; CHECK-NEXT:         .byte   0x01
+ ; CHECK-NEXT:         .byte   0x01
+ ; CHECK-NEXT:         .byte   0x02
+diff --git a/llvm/test/CodeGen/PowerPC/xray-tail-call-hidden.ll b/llvm/test/CodeGen/PowerPC/xray-tail-call-hidden.ll
+index 949b2837fd5c..ec6d19c49358 100644
+--- a/llvm/test/CodeGen/PowerPC/xray-tail-call-hidden.ll
++++ b/llvm/test/CodeGen/PowerPC/xray-tail-call-hidden.ll
+@@ -3,21 +3,24 @@
+ declare hidden i32 @callee() nounwind noinline uwtable "function-instrument"="xray-always"
+ 
+ define i32 @caller() nounwind noinline uwtable "function-instrument"="xray-always" {
+-; CHECK-LABEL: .Ltmp0:
+-; CHECK:              b .Ltmp1
++; CHECK-LABEL: caller:
++; CHECK:       .Ltmp[[#l:]]:
++; CHECK-NEXT:         b .Ltmp[[#l+1]]
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         std 0, -8(1)
+ ; CHECK-NEXT:         mflr 0
+ ; CHECK-NEXT:         bl __xray_FunctionEntry
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         mtlr 0
+-; CHECK-LABEL: .Ltmp1:
++; CHECK-NEXT:  .Ltmp[[#l+1]]:
+ ; CHECK:              bl callee
+ ; CHECK-NEXT:         nop
+   %retval = tail call i32 @callee()
+   ret i32 %retval
+-; CHECK-LABEL: .Ltmp2:
+-; CHECK:              std 0, -8(1)
++; CHECK:       .Ltmp[[#l+2]]:
++; CHECK-NEXT:         blr
++; CHECK-NEXT:         nop
++; CHECK-NEXT:         std 0, -8(1)
+ ; CHECK-NEXT:         mflr 0
+ ; CHECK-NEXT:         bl __xray_FunctionExit
+ ; CHECK-NEXT:         nop
+diff --git a/llvm/test/CodeGen/PowerPC/xray-tail-call-sled.ll b/llvm/test/CodeGen/PowerPC/xray-tail-call-sled.ll
+index 186ec53f88a9..bcc5b982a286 100644
+--- a/llvm/test/CodeGen/PowerPC/xray-tail-call-sled.ll
++++ b/llvm/test/CodeGen/PowerPC/xray-tail-call-sled.ll
+@@ -1,17 +1,18 @@
+ ; RUN: llc -relocation-model=pic -mtriple=powerpc64le-unknown-linux-gnu < %s | FileCheck %s
+ 
+ define i32 @callee() nounwind noinline uwtable "function-instrument"="xray-always" {
+-; CHECK-LABEL: .Ltmp0:
+-; CHECK:              b .Ltmp1
++; CHECK-LABEL: callee:
++; CHECK:       .Ltmp[[#l:]]:
++; CHECK-NEXT:         b .Ltmp[[#l+1]]
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         std 0, -8(1)
+ ; CHECK-NEXT:         mflr 0
+ ; CHECK-NEXT:         bl __xray_FunctionEntry
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         mtlr 0
+-; CHECK-LABEL: .Ltmp1:
++; CHECK-NEXT:  .Ltmp[[#l+1]]:
+   ret i32 0
+-; CHECK-LABEL: .Ltmp2:
++; CHECK:       .Ltmp[[#]]:
+ ; CHECK:              blr
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         std 0, -8(1)
+@@ -22,19 +23,20 @@ define i32 @callee() nounwind noinline uwtable "function-instrument"="xray-alway
+ }
+ 
+ define i32 @caller() nounwind noinline uwtable "function-instrument"="xray-always" {
+-; CHECK-LABEL: .Ltmp5:
+-; CHECK-NEXT:         b .Ltmp6
++; CHECK-LABEL: caller:
++; CHECK:       .Ltmp[[#l:]]:
++; CHECK-NEXT:         b .Ltmp[[#l+1]]
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         std 0, -8(1)
+ ; CHECK-NEXT:         mflr 0
+ ; CHECK-NEXT:         bl __xray_FunctionEntry
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         mtlr 0
+-; CHECK-LABEL: .Ltmp6:
++; CHECK-NEXT:  .Ltmp[[#l+1]]:
+   %retval = tail call i32 @callee()
+   ret i32 %retval
+-; CHECK-LABEL: .Ltmp7:
+-; CHECK:              blr
++; CHECK:       .Ltmp[[#l+2]]:
++; CHECK-NEXT:         blr
+ ; CHECK-NEXT:         nop
+ ; CHECK-NEXT:         std 0, -8(1)
+ ; CHECK-NEXT:         mflr 0
+diff --git a/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll
+index d62bb250620c..f7137f50f49c 100644
+--- a/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll
++++ b/llvm/test/CodeGen/X86/xray-attribute-instrumentation.ll
+@@ -59,12 +59,12 @@ NotEqual:
+ 
+ ; CHECK-LINUX-LABEL: .section xray_instr_map,"ao",@progbits,bar{{$}}
+ ; CHECK-LINUX-LABEL: .Lxray_sleds_start1:
+-; CHECK-LINUX:       .Ltmp2:
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sled_2-.Ltmp2
+-; CHECK-LINUX:       .Ltmp3:
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sled_3-.Ltmp3
+-; CHECK-LINUX:       .Ltmp4:
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sled_4-.Ltmp4
++; CHECK-LINUX:       [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .quad .Lxray_sled_2-[[TMP]]
++; CHECK-LINUX:       [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .quad .Lxray_sled_3-[[TMP]]
++; CHECK-LINUX:       [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .quad .Lxray_sled_4-[[TMP]]
+ ; CHECK-LINUX-LABEL: .Lxray_sleds_end1:
+ ; CHECK-LINUX-LABEL: .section xray_fn_idx,"awo",@progbits,bar{{$}}
+ ; CHECK-LINUX:         .quad .Lxray_sleds_start1
+@@ -72,12 +72,12 @@ NotEqual:
+ 
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_instr_map{{$}}
+ ; CHECK-MACOS-LABEL: Lxray_sleds_start1:
+-; CHECK-MACOS:       Ltmp2:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_2-Ltmp2
+-; CHECK-MACOS:       Ltmp3:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_3-Ltmp3
+-; CHECK-MACOS:       Ltmp4:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_4-Ltmp4
++; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_2-[[TMP]]
++; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_3-[[TMP]]
++; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_4-[[TMP]]
+ ; CHECK-MACOS-LABEL: Lxray_sleds_end1:
+ ; CHECK-MACOS-LABEL: .section __DATA,xray_fn_idx{{$}}
+ ; CHECK-MACOS:         .quad Lxray_sleds_start1
+diff --git a/llvm/test/CodeGen/X86/xray-log-args.ll b/llvm/test/CodeGen/X86/xray-log-args.ll
+index a6a4ddc95889..2212c3fd9e9c 100644
+--- a/llvm/test/CodeGen/X86/xray-log-args.ll
++++ b/llvm/test/CodeGen/X86/xray-log-args.ll
+@@ -10,32 +10,32 @@ define i32 @callee(i32 %arg) nounwind noinline uwtable "function-instrument"="xr
+ ; CHECK-NEXT:  Lfunc_begin0:
+ 
+ ; CHECK-LINUX-LABEL: .Lxray_sleds_start0:
+-; CHECK-LINUX-NEXT:  .Ltmp0:
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sled_0-.Ltmp0
+-; CHECK-LINUX-NEXT:    .quad .Lfunc_begin0-(.Ltmp0+8)
++; CHECK-LINUX-NEXT:  [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .quad .Lxray_sled_0-[[TMP]]
++; CHECK-LINUX-NEXT:    .quad .Lfunc_begin0-([[TMP]]+8)
+ ; CHECK-LINUX-NEXT:    .byte 0x03
+ ; CHECK-LINUX-NEXT:    .byte 0x01
+ ; CHECK-LINUX-NEXT:    .byte 0x02
+ ; CHECK-LINUX:         .zero 13
+-; CHECK-LINUX:       .Ltmp1:
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sled_1-.Ltmp1
+-; CHECK-LINUX-NEXT:    .quad .Lfunc_begin0-(.Ltmp1+8)
++; CHECK-LINUX:       [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .quad .Lxray_sled_1-[[TMP]]
++; CHECK-LINUX-NEXT:    .quad .Lfunc_begin0-([[TMP]]+8)
+ ; CHECK-LINUX-NEXT:    .byte 0x01
+ ; CHECK-LINUX-NEXT:    .byte 0x01
+ ; CHECK-LINUX-NEXT:    .byte 0x02
+ ; CHECK-LINUX:         .zero 13
+ 
+ ; CHECK-MACOS-LABEL: Lxray_sleds_start0:
+-; CHECK-MACOS-NEXT:  Ltmp0:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_0-Ltmp0
+-; CHECK-MACOS-NEXT:    .quad Lfunc_begin0-(Ltmp0+8)
++; CHECK-MACOS-NEXT:  [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_0-[[TMP]]
++; CHECK-MACOS-NEXT:    .quad Lfunc_begin0-([[TMP]]+8)
+ ; CHECK-MACOS-NEXT:    .byte 0x03
+ ; CHECK-MACOS-NEXT:    .byte 0x01
+ ; CHECK-MACOS-NEXT:    .byte 0x02
+ ; CHECK-MACOS:         .space 13
+-; CHECK-MACOS:       Ltmp1:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_1-Ltmp1
+-; CHECK-MACOS-NEXT:    .quad Lfunc_begin0-(Ltmp1+8)
++; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_1-[[TMP]]
++; CHECK-MACOS-NEXT:    .quad Lfunc_begin0-([[TMP]]+8)
+ ; CHECK-MACOS-NEXT:    .byte 0x01
+ ; CHECK-MACOS-NEXT:    .byte 0x01
+ ; CHECK-MACOS-NEXT:    .byte 0x02
+@@ -47,32 +47,32 @@ define i32 @caller(i32 %arg) nounwind noinline uwtable "function-instrument"="xr
+ }
+ 
+ ; CHECK-LINUX-LABEL: .Lxray_sleds_start1:
+-; CHECK-LINUX-NEXT:  .Ltmp3:
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sled_2-.Ltmp3
+-; CHECK-LINUX-NEXT:    .quad .Lfunc_begin1-(.Ltmp3+8)
++; CHECK-LINUX-NEXT:  [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .quad .Lxray_sled_2-[[TMP]]
++; CHECK-LINUX-NEXT:    .quad .Lfunc_begin1-([[TMP]]+8)
+ ; CHECK-LINUX-NEXT:    .byte 0x03
+ ; CHECK-LINUX-NEXT:    .byte 0x01
+ ; CHECK-LINUX-NEXT:    .byte 0x02
+ ; CHECK-LINUX:         .zero 13
+-; CHECK-LINUX:       .Ltmp4:
+-; CHECK-LINUX-NEXT:    .quad .Lxray_sled_3-.Ltmp4
+-; CHECK-LINUX-NEXT:    .quad .Lfunc_begin1-(.Ltmp4+8)
++; CHECK-LINUX:       [[TMP:.Ltmp[0-9]+]]:
++; CHECK-LINUX-NEXT:    .quad .Lxray_sled_3-[[TMP]]
++; CHECK-LINUX-NEXT:    .quad .Lfunc_begin1-([[TMP]]+8)
+ ; CHECK-LINUX-NEXT:    .byte 0x02
+ ; CHECK-LINUX-NEXT:    .byte 0x01
+ ; CHECK-LINUX-NEXT:    .byte 0x02
+ ; CHECK-LINUX:         .zero 13
+ 
+ ; CHECK-MACOS-LABEL: Lxray_sleds_start1:
+-; CHECK-MACOS-NEXT:  Ltmp3:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_2-Ltmp3
+-; CHECK-MACOS-NEXT:    .quad Lfunc_begin1-(Ltmp3+8)
++; CHECK-MACOS-NEXT:  [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_2-[[TMP]]
++; CHECK-MACOS-NEXT:    .quad Lfunc_begin1-([[TMP]]+8)
+ ; CHECK-MACOS-NEXT:    .byte 0x03
+ ; CHECK-MACOS-NEXT:    .byte 0x01
+ ; CHECK-MACOS-NEXT:    .byte 0x02
+ ; CHECK-MACOS:         .space 13
+-; CHECK-MACOS:       Ltmp4:
+-; CHECK-MACOS-NEXT:    .quad Lxray_sled_3-Ltmp4
+-; CHECK-MACOS-NEXT:    .quad Lfunc_begin1-(Ltmp4+8)
++; CHECK-MACOS:       [[TMP:Ltmp[0-9]+]]:
++; CHECK-MACOS-NEXT:    .quad Lxray_sled_3-[[TMP]]
++; CHECK-MACOS-NEXT:    .quad Lfunc_begin1-([[TMP]]+8)
+ ; CHECK-MACOS-NEXT:    .byte 0x02
+ ; CHECK-MACOS-NEXT:    .byte 0x01
+ ; CHECK-MACOS-NEXT:    .byte 0x02
+-- 
+2.39.3
+

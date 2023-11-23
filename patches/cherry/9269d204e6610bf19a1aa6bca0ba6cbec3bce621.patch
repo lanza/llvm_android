@@ -1,0 +1,39 @@
+From 9269d204e6610bf19a1aa6bca0ba6cbec3bce621 Mon Sep 17 00:00:00 2001
+From: Vitaly Buka <vitalybuka@google.com>
+Date: Thu, 11 May 2023 20:38:08 -0700
+Subject: [PATCH] [NFC][xray] Initialize XRayFileHeader
+
+Avoids reports with msan -fno-inline.
+---
+ llvm/include/llvm/XRay/XRayRecord.h | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/llvm/include/llvm/XRay/XRayRecord.h b/llvm/include/llvm/XRay/XRayRecord.h
+index 546b02303b6a..75a2444fd01b 100644
+--- a/llvm/include/llvm/XRay/XRayRecord.h
++++ b/llvm/include/llvm/XRay/XRayRecord.h
+@@ -34,10 +34,10 @@ struct XRayFileHeader {
+ 
+   /// Whether the CPU that produced the timestamp counters (TSC) move at a
+   /// constant rate.
+-  bool ConstantTSC;
++  bool ConstantTSC = false;
+ 
+   /// Whether the CPU that produced the timestamp counters (TSC) do not stop.
+-  bool NonstopTSC;
++  bool NonstopTSC = false;
+ 
+   /// The number of cycles per second for the CPU that produced the timestamp
+   /// counter (TSC) values. Useful for estimating the amount of time that
+@@ -47,7 +47,7 @@ struct XRayFileHeader {
+   // This is different depending on the type of xray record. The naive format
+   // stores a Wallclock timespec. FDR logging stores the size of a thread
+   // buffer.
+-  char FreeFormData[16];
++  char FreeFormData[16] = {};
+ };
+ 
+ /// Determines the supported types of records that could be seen in XRay traces.
+-- 
+2.39.3
+

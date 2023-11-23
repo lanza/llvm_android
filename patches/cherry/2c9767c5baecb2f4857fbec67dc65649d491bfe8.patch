@@ -1,0 +1,246 @@
+From 2c9767c5baecb2f4857fbec67dc65649d491bfe8 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Mon, 19 Jun 2023 20:28:39 -0700
+Subject: [PATCH] [XRay] Make llvm.xray.typedevent parameter type match
+ __xray_typedevent
+
+The Clang built-in function is void __xray_typedevent(size_t, const void *, size_t),
+but the LLVM intrinsics has smaller integer types. Since we only allow
+64-bit ELF/Mach-O targets, we can change llvm.xray.typedevent to
+i64/ptr/i64.
+
+This allows encoding more information and avoids i16 legalization for
+many non-X86 targets.
+
+fdrLoggingHandleTypedEvent only supports uint16_t event type.
+
+Change-Id: Iaa8c96aa35684a9bcc9683e5590078d2aeb627c8
+---
+ .../CodeGen/xray-always-emit-typedevent.cpp   |  2 +-
+ .../CodeGen/xray-instrumentation-bundles.cpp  | 24 +++++++++----------
+ clang/test/CodeGen/xray-typedevent.cpp        |  2 +-
+ compiler-rt/include/xray/xray_interface.h     |  5 ++--
+ compiler-rt/lib/xray/xray_fdr_logging.cpp     |  9 +++----
+ compiler-rt/lib/xray/xray_interface.cpp       |  4 ++--
+ .../TestCases/Posix/typed-event-logging.cpp   |  2 +-
+ llvm/include/llvm/IR/Intrinsics.td            |  2 +-
+ llvm/test/CodeGen/X86/xray-custom-log.ll      | 20 ++++++++--------
+ 9 files changed, 36 insertions(+), 34 deletions(-)
+
+diff --git a/clang/test/CodeGen/xray-always-emit-typedevent.cpp b/clang/test/CodeGen/xray-always-emit-typedevent.cpp
+index 50593dd20322..aa8bc907ec67 100644
+--- a/clang/test/CodeGen/xray-always-emit-typedevent.cpp
++++ b/clang/test/CodeGen/xray-always-emit-typedevent.cpp
+@@ -1,4 +1,4 @@
+-// RUN: %clang_cc1 -fxray-instrument -fxray-always-emit-typedevents -x c++ \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument -fxray-always-emit-typedevents -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck %s
+ 
+diff --git a/clang/test/CodeGen/xray-instrumentation-bundles.cpp b/clang/test/CodeGen/xray-instrumentation-bundles.cpp
+index 1174eb312149..0b99d291d421 100644
+--- a/clang/test/CodeGen/xray-instrumentation-bundles.cpp
++++ b/clang/test/CodeGen/xray-instrumentation-bundles.cpp
+@@ -1,48 +1,48 @@
+-// RUN: %clang_cc1 -fxray-instrument -fxray-instrumentation-bundle=none -x c++ \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument -fxray-instrumentation-bundle=none -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,NOFUNCTION,NOCUSTOM,NOTYPED %s
+-// RUN: %clang_cc1 -fxray-instrument -fxray-instrumentation-bundle=function -x c++ \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument -fxray-instrumentation-bundle=function -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,FUNCTION,NOCUSTOM,NOTYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=custom -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,NOFUNCTION,CUSTOM,NOTYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=typed -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,NOFUNCTION,NOCUSTOM,TYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=custom,typed -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,NOFUNCTION,CUSTOM,TYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=function,custom -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,FUNCTION,CUSTOM,NOTYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=function,typed -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,FUNCTION,NOCUSTOM,TYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=function,custom,typed -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,FUNCTION,CUSTOM,TYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=function \
+ // RUN:     -fxray-instrumentation-bundle=custom \
+ // RUN:     -fxray-instrumentation-bundle=typed -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,FUNCTION,CUSTOM,TYPED %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=function-entry -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,NOCUSTOM,NOTYPED,SKIPEXIT %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=function-exit -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,NOCUSTOM,NOTYPED,SKIPENTRY %s
+-// RUN: %clang_cc1 -fxray-instrument \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument \
+ // RUN:     -fxray-instrumentation-bundle=function-entry,function-exit -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck --check-prefixes CHECK,FUNCTION,NOCUSTOM,NOTYPED %s
+diff --git a/clang/test/CodeGen/xray-typedevent.cpp b/clang/test/CodeGen/xray-typedevent.cpp
+index e804b09dc2c4..886ec84e860b 100644
+--- a/clang/test/CodeGen/xray-typedevent.cpp
++++ b/clang/test/CodeGen/xray-typedevent.cpp
+@@ -1,4 +1,4 @@
+-// RUN: %clang_cc1 -fxray-instrument -x c++ -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s | FileCheck %s
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument -x c++ -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s | FileCheck %s
+ 
+ // CHECK-LABEL: @_Z16alwaysInstrumentv
+ [[clang::xray_always_instrument]] void alwaysInstrument() {
+diff --git a/compiler-rt/include/xray/xray_interface.h b/compiler-rt/include/xray/xray_interface.h
+index 410515d2373a..727431c04e4f 100644
+--- a/compiler-rt/include/xray/xray_interface.h
++++ b/compiler-rt/include/xray/xray_interface.h
+@@ -76,8 +76,9 @@ extern int __xray_remove_customevent_handler();
+ 
+ /// Set a handler for xray typed event logging. The first parameter is a type
+ /// identifier, the second is a payload, and the third is the payload size.
+-extern int __xray_set_typedevent_handler(void (*entry)(uint16_t, const void *,
+-                                                       std::size_t));
++/// NOTE: fdrLoggingHandleTypedEvent only supports uint16_t event type.
++extern int __xray_set_typedevent_handler(void (*entry)(size_t, const void *,
++                                                       size_t));
+ 
+ /// Removes the currently set typed event handler.
+ /// Returns 1 on success, 0 on error.
+diff --git a/compiler-rt/lib/xray/xray_fdr_logging.cpp b/compiler-rt/lib/xray/xray_fdr_logging.cpp
+index 799814f437f9..6056f8134553 100644
+--- a/compiler-rt/lib/xray/xray_fdr_logging.cpp
++++ b/compiler-rt/lib/xray/xray_fdr_logging.cpp
+@@ -580,9 +580,9 @@ void fdrLoggingHandleCustomEvent(void *Event,
+   TLD.Controller->customEvent(TSC, CPU, Event, ReducedEventSize);
+ }
+ 
+-void fdrLoggingHandleTypedEvent(
+-    uint16_t EventType, const void *Event,
+-    std::size_t EventSize) noexcept XRAY_NEVER_INSTRUMENT {
++void fdrLoggingHandleTypedEvent(size_t EventType, const void *Event,
++                                size_t EventSize) noexcept
++    XRAY_NEVER_INSTRUMENT {
+   auto TC = getTimestamp();
+   auto &TSC = TC.TSC;
+   auto &CPU = TC.CPU;
+@@ -607,7 +607,8 @@ void fdrLoggingHandleTypedEvent(
+     return;
+ 
+   int32_t ReducedEventSize = static_cast<int32_t>(EventSize);
+-  TLD.Controller->typedEvent(TSC, CPU, EventType, Event, ReducedEventSize);
++  TLD.Controller->typedEvent(TSC, CPU, static_cast<uint16_t>(EventType), Event,
++                             ReducedEventSize);
+ }
+ 
+ XRayLogInitStatus fdrLoggingInit(size_t, size_t, void *Options,
+diff --git a/compiler-rt/lib/xray/xray_interface.cpp b/compiler-rt/lib/xray/xray_interface.cpp
+index 0bbdd805730f..227172610e6f 100644
+--- a/compiler-rt/lib/xray/xray_interface.cpp
++++ b/compiler-rt/lib/xray/xray_interface.cpp
+@@ -426,8 +426,8 @@ int __xray_set_customevent_handler(void (*entry)(void *, size_t))
+   return 0;
+ }
+ 
+-int __xray_set_typedevent_handler(void (*entry)(
+-    uint16_t, const void *, size_t)) XRAY_NEVER_INSTRUMENT {
++int __xray_set_typedevent_handler(void (*entry)(size_t, const void *,
++                                                size_t)) XRAY_NEVER_INSTRUMENT {
+   if (atomic_load(&XRayInitialized,
+                                memory_order_acquire)) {
+     atomic_store(&__xray::XRayPatchedTypedEvent,
+diff --git a/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp b/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
+index 20c99557acc4..103b11cfb097 100644
+--- a/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
++++ b/compiler-rt/test/xray/TestCases/Posix/typed-event-logging.cpp
+@@ -14,7 +14,7 @@
+   printf("after calling the custom logging...\n");
+ }
+ 
+-static void myprinter(uint16_t type, const void *ptr, size_t size) {
++static void myprinter(size_t type, const void *ptr, size_t size) {
+   assert(type == 42);
+   printf("%.*s\n", static_cast<int>(size), static_cast<const char*>(ptr));
+ }
+diff --git a/llvm/include/llvm/IR/Intrinsics.td b/llvm/include/llvm/IR/Intrinsics.td
+index 538039550363..26a6c881eb99 100644
+--- a/llvm/include/llvm/IR/Intrinsics.td
++++ b/llvm/include/llvm/IR/Intrinsics.td
+@@ -1468,7 +1468,7 @@ def int_xray_customevent : Intrinsic<[], [llvm_ptr_ty, llvm_i32_ty],
+                                       ReadOnly<ArgIndex<0>>]>;
+ // Typed event logging for x-ray.
+ // Takes a numeric type tag, a pointer to a string and the length of the string.
+-def int_xray_typedevent : Intrinsic<[], [llvm_i16_ty, llvm_ptr_ty, llvm_i32_ty],
++def int_xray_typedevent : Intrinsic<[], [llvm_i64_ty, llvm_ptr_ty, llvm_i64_ty],
+                                         [IntrWriteMem, NoCapture<ArgIndex<1>>,
+                                          ReadOnly<ArgIndex<1>>]>;
+ //===----------------------------------------------------------------------===//
+diff --git a/llvm/test/CodeGen/X86/xray-custom-log.ll b/llvm/test/CodeGen/X86/xray-custom-log.ll
+index 1579e4b909de..28699e9bb4bc 100644
+--- a/llvm/test/CodeGen/X86/xray-custom-log.ll
++++ b/llvm/test/CodeGen/X86/xray-custom-log.ll
+@@ -7,9 +7,9 @@
+ define i32 @customevent() nounwind "function-instrument"="xray-always" !dbg !1 {
+     %eventptr = alloca i8
+     %eventsize = alloca i32
+-    store i32 3, i32* %eventsize
+-    %val = load i32, i32* %eventsize
+-    call void @llvm.xray.customevent(i8* %eventptr, i32 %val), !dbg !8
++    store i32 3, ptr %eventsize
++    %val = load i32, ptr %eventsize
++    call void @llvm.xray.customevent(ptr %eventptr, i32 %val), !dbg !8
+     ; CHECK-LABEL: Lxray_event_sled_0:
+     ; CHECK:       .byte 0xeb, 0x0f
+     ; CHECK-NEXT:  pushq %rdi
+@@ -39,11 +39,11 @@ define i32 @typedevent() nounwind "function-instrument"="xray-always" !dbg !2 {
+     %eventptr = alloca i8
+     %eventsize = alloca i32
+     %eventtype = alloca i16
+-    store i16 6, i16* %eventtype
+-    %type = load i16, i16* %eventtype
+-    store i32 3, i32* %eventsize
+-    %val = load i32, i32* %eventsize
+-    call void @llvm.xray.typedevent(i16 %type, i8* %eventptr, i32 %val), !dbg !9
++    store i16 6, ptr %eventtype
++    %type = load i16, ptr %eventtype
++    store i32 3, ptr %eventsize
++    %val = load i32, ptr %eventsize
++    call void @llvm.xray.typedevent(i16 %type, ptr %eventptr, i32 %val), !dbg !9
+     ; CHECK-LABEL: Lxray_typed_event_sled_0:
+     ; CHECK:       .byte 0xeb, 0x14
+     ; CHECK-NEXT:  pushq %rdi
+@@ -75,8 +75,8 @@ define i32 @typedevent() nounwind "function-instrument"="xray-always" !dbg !2 {
+ ; CHECK-LABEL: Lxray_sleds_start1:
+ ; CHECK:       .quad {{.*}}xray_typed_event_sled_0
+ 
+-declare void @llvm.xray.customevent(i8*, i32)
+-declare void @llvm.xray.typedevent(i16, i8*, i32)
++declare void @llvm.xray.customevent(ptr, i32)
++declare void @llvm.xray.typedevent(i16, ptr, i32)
+ 
+ ;; Construct call site entries for PATCHABLE_EVENT_CALL.
+ ; DBG:     DW_TAG_subprogram
+-- 
+2.39.3
+

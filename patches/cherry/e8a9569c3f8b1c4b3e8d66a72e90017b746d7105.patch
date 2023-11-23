@@ -1,0 +1,52 @@
+From e8a9569c3f8b1c4b3e8d66a72e90017b746d7105 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Mon, 19 Jun 2023 20:38:16 -0700
+Subject: [PATCH] [XRay] Make llvm.xray.customevent parameter type match
+ __xray_customevent
+
+The intrinsic has a smaller integer type than the parameter type of
+builtin-function/API. Fix this similar to commit 3fa3cb408d8d0f1365b322262e501b6945f7ead9.
+
+Change-Id: Ic19217535a34c0f7b7a9821b452140b554e8fc3b
+---
+ clang/test/CodeGen/xray-always-emit-customevent.cpp | 2 +-
+ clang/test/CodeGen/xray-customevent.cpp             | 2 +-
+ llvm/include/llvm/IR/Intrinsics.td                  | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/clang/test/CodeGen/xray-always-emit-customevent.cpp b/clang/test/CodeGen/xray-always-emit-customevent.cpp
+index 8ac22f2a1bca..d8996366c9e3 100644
+--- a/clang/test/CodeGen/xray-always-emit-customevent.cpp
++++ b/clang/test/CodeGen/xray-always-emit-customevent.cpp
+@@ -1,4 +1,4 @@
+-// RUN: %clang_cc1 -fxray-instrument -fxray-always-emit-customevents -x c++ \
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument -fxray-always-emit-customevents -x c++ \
+ // RUN:     -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s \
+ // RUN:     | FileCheck %s
+ 
+diff --git a/clang/test/CodeGen/xray-customevent.cpp b/clang/test/CodeGen/xray-customevent.cpp
+index 359d92df938a..91c5baf380e1 100644
+--- a/clang/test/CodeGen/xray-customevent.cpp
++++ b/clang/test/CodeGen/xray-customevent.cpp
+@@ -1,4 +1,4 @@
+-// RUN: %clang_cc1 -fxray-instrument -x c++ -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s | FileCheck %s
++// RUN: %clang_cc1 -no-opaque-pointers -fxray-instrument -x c++ -std=c++11 -triple x86_64-unknown-unknown -emit-llvm -o - %s | FileCheck %s
+ 
+ // CHECK-LABEL: @_Z16alwaysInstrumentv
+ [[clang::xray_always_instrument]] void alwaysInstrument() {
+diff --git a/llvm/include/llvm/IR/Intrinsics.td b/llvm/include/llvm/IR/Intrinsics.td
+index 26a6c881eb99..13db4cfa672d 100644
+--- a/llvm/include/llvm/IR/Intrinsics.td
++++ b/llvm/include/llvm/IR/Intrinsics.td
+@@ -1463,7 +1463,7 @@ def int_hwasan_check_memaccess_shortgranules :
+ //===----------------------------------------------------------------------===//
+ // Custom event logging for x-ray.
+ // Takes a pointer to a string and the length of the string.
+-def int_xray_customevent : Intrinsic<[], [llvm_ptr_ty, llvm_i32_ty],
++def int_xray_customevent : Intrinsic<[], [llvm_ptr_ty, llvm_i64_ty],
+                                      [IntrWriteMem, NoCapture<ArgIndex<0>>,
+                                       ReadOnly<ArgIndex<0>>]>;
+ // Typed event logging for x-ray.
+-- 
+2.39.3
+

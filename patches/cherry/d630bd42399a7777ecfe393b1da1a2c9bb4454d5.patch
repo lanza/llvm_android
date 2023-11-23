@@ -1,0 +1,125 @@
+From d630bd42399a7777ecfe393b1da1a2c9bb4454d5 Mon Sep 17 00:00:00 2001
+From: Fangrui Song <i@maskray.me>
+Date: Tue, 24 Aug 2021 13:35:19 -0700
+Subject: [PATCH] llvm-xray {convert,extract}: Add --demangle
+
+No demangling may be a better default in the future.
+Add `--demangle` for migration convenience.
+
+Reviewed By: Enna1
+
+Differential Revision: https://reviews.llvm.org/D108100
+---
+ .../tools/llvm-xray/AArch64/extract-instrmap.test   |  2 ++
+ .../tools/llvm-xray/X86/convert-with-debug-syms.txt |  3 ++-
+ .../tools/llvm-xray/X86/extract-instrmap-pie.ll     |  8 ++++----
+ llvm/tools/llvm-xray/xray-converter.cpp             |  6 +++++-
+ llvm/tools/llvm-xray/xray-extract.cpp               | 13 +++++++------
+ 5 files changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/llvm/test/tools/llvm-xray/AArch64/extract-instrmap.test b/llvm/test/tools/llvm-xray/AArch64/extract-instrmap.test
+index c8905c30545a..947624cb4063 100644
+--- a/llvm/test/tools/llvm-xray/AArch64/extract-instrmap.test
++++ b/llvm/test/tools/llvm-xray/AArch64/extract-instrmap.test
+@@ -3,6 +3,7 @@
+ 
+ # RUN: yaml2obj %S/Inputs/elf64-pic.yaml -o %t.so
+ # RUN: llvm-xray extract %t.so -s | FileCheck %s
++# RUN: llvm-xray extract %t.so --no-demangle --demangle -s | FileCheck %s
+ 
+ # CHECK:      ---
+ # CHECK-NEXT: - { id: 1, address: 0x420, function: 0x420, kind: function-enter, always-instrument: true, function-name: 'foo()' }
+@@ -14,6 +15,7 @@
+ # CHECK-NEXT: ...
+ 
+ # RUN: llvm-xray extract -s --no-demangle %t.so | FileCheck --check-prefix=MANGLED %s
++# RUN: llvm-xray extract -s --demangle --no-demangle %t.so | FileCheck --check-prefix=MANGLED %s
+ 
+ # MANGLED:      ---
+ # MANGLED-NEXT: - { id: 1, address: 0x420, function: 0x420, kind: function-enter, always-instrument: true, function-name: _Z3foov }
+diff --git a/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt b/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
+index fd6695a795f6..c30427f0a7f3 100644
+--- a/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
++++ b/llvm/test/tools/llvm-xray/X86/convert-with-debug-syms.txt
+@@ -1,4 +1,5 @@
+-; RUN: llvm-xray convert -m %S/Inputs/elf64-sample-o2.bin -y %S/Inputs/naive-log-simple.xray -f yaml -o - 2>&1 | FileCheck %s
++; RUN: llvm-xray convert -m %S/Inputs/elf64-sample-o2.bin -y %S/Inputs/naive-log-simple.xray -f yaml 2>&1 | FileCheck %s
++; RUN: llvm-xray convert -m %S/Inputs/elf64-sample-o2.bin -y %S/Inputs/naive-log-simple.xray -f yaml --demangle 2>&1 | FileCheck %s
+ 
+ ; CHECK:      ---
+ ; CHECK-NEXT: header:
+diff --git a/llvm/test/tools/llvm-xray/X86/extract-instrmap-pie.ll b/llvm/test/tools/llvm-xray/X86/extract-instrmap-pie.ll
+index 1bff8e252aa1..f1f89e3edc0e 100644
+--- a/llvm/test/tools/llvm-xray/X86/extract-instrmap-pie.ll
++++ b/llvm/test/tools/llvm-xray/X86/extract-instrmap-pie.ll
+@@ -4,8 +4,8 @@
+ ; RUN: llvm-xray extract %S/Inputs/elf64-pie.bin -s | FileCheck %s
+ 
+ ; CHECK:      ---
+-; CHECK-NEXT: - { id: 1, address: 0x299C0, function: 0x299C0, kind: function-enter, always-instrument: true, function-name: {{.*foo.*}} }
+-; CHECK-NEXT: - { id: 1, address: 0x299D0, function: 0x299C0, kind: function-exit, always-instrument: true, function-name: {{.*foo.*}} }
+-; CHECK-NEXT: - { id: 2, address: 0x299E0, function: 0x299E0, kind: function-enter, always-instrument: true, function-name: {{.*bar.*}} }
+-; CHECK-NEXT: - { id: 2, address: 0x299F6, function: 0x299E0, kind: function-exit, always-instrument: true, function-name: {{.*bar.*}} }
++; CHECK-NEXT: - { id: 1, address: 0x299C0, function: 0x299C0, kind: function-enter, always-instrument: true, function-name: 'foo()' }
++; CHECK-NEXT: - { id: 1, address: 0x299D0, function: 0x299C0, kind: function-exit, always-instrument: true, function-name: 'foo()' }
++; CHECK-NEXT: - { id: 2, address: 0x299E0, function: 0x299E0, kind: function-enter, always-instrument: true, function-name: 'bar()' }
++; CHECK-NEXT: - { id: 2, address: 0x299F6, function: 0x299E0, kind: function-exit, always-instrument: true, function-name: 'bar()' }
+ ; CHECK-NEXT: ...
+diff --git a/llvm/tools/llvm-xray/xray-converter.cpp b/llvm/tools/llvm-xray/xray-converter.cpp
+index 974471781804..e084cbba46c3 100644
+--- a/llvm/tools/llvm-xray/xray-converter.cpp
++++ b/llvm/tools/llvm-xray/xray-converter.cpp
+@@ -63,6 +63,10 @@ static cl::opt<bool>
+                         "when symbolizing function ids from the input log"),
+                cl::init(false), cl::sub(Convert));
+ 
++static cl::opt<bool> Demangle("demangle",
++                              cl::desc("demangle symbols (default)"),
++                              cl::sub(Convert));
++
+ static cl::opt<std::string>
+     ConvertInstrMap("instr_map",
+                     cl::desc("binary with the instrumentation map, or "
+@@ -381,7 +385,7 @@ static CommandRegistration Unused(&Convert, []() -> Error {
+ 
+   const auto &FunctionAddresses = Map.getFunctionAddresses();
+   symbolize::LLVMSymbolizer::Options SymbolizerOpts;
+-  if (NoDemangle)
++  if (Demangle.getPosition() < NoDemangle.getPosition())
+     SymbolizerOpts.Demangle = false;
+   symbolize::LLVMSymbolizer Symbolizer(SymbolizerOpts);
+   llvm::xray::FuncIdConversionHelper FuncIdHelper(ConvertInstrMap, Symbolizer,
+diff --git a/llvm/tools/llvm-xray/xray-extract.cpp b/llvm/tools/llvm-xray/xray-extract.cpp
+index 8304d2d27afa..02596302bbdf 100644
+--- a/llvm/tools/llvm-xray/xray-extract.cpp
++++ b/llvm/tools/llvm-xray/xray-extract.cpp
+@@ -45,11 +45,12 @@ static cl::opt<bool> ExtractSymbolize("symbolize", cl::value_desc("symbolize"),
+                                       cl::sub(Extract));
+ static cl::alias ExtractSymbolize2("s", cl::aliasopt(ExtractSymbolize),
+                                    cl::desc("alias for -symbolize"));
+-static cl::opt<bool> ExtractNoDemangle("no-demangle",
+-                                       cl::value_desc("no-demangle"),
+-                                       cl::init(false),
+-                                       cl::desc("don't demangle symbols"),
+-                                       cl::sub(Extract));
++static cl::opt<bool> Demangle("demangle",
++                              cl::desc("demangle symbols (default)"),
++                              cl::sub(Extract));
++static cl::opt<bool> NoDemangle("no-demangle",
++                                cl::desc("don't demangle symbols"),
++                                cl::sub(Extract));
+ 
+ namespace {
+ 
+@@ -90,7 +91,7 @@ static CommandRegistration Unused(&Extract, []() -> Error {
+   const auto &FunctionAddresses =
+       InstrumentationMapOrError->getFunctionAddresses();
+   symbolize::LLVMSymbolizer::Options opts;
+-  if (ExtractNoDemangle)
++  if (Demangle.getPosition() < NoDemangle.getPosition())
+     opts.Demangle = false;
+   symbolize::LLVMSymbolizer Symbolizer(opts);
+   llvm::xray::FuncIdConversionHelper FuncIdHelper(ExtractInput, Symbolizer,
+-- 
+2.39.3
+
